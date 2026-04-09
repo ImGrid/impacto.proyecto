@@ -33,8 +33,6 @@ async function proxyRequest(req: NextRequest) {
   let accessToken = cookieStore.get("access_token")?.value;
   const refreshToken = cookieStore.get("refresh_token")?.value;
 
-  console.log("[BFF]", req.method, req.nextUrl.pathname, "| access:", accessToken ? "YES" : "NO", "| refresh:", refreshToken ? "YES" : "NO", "| API_URL:", API_URL);
-
   // Construir la URL destino: /api/zonas?page=1 → API_URL/zonas?page=1
   const { pathname, search } = req.nextUrl;
   const backendPath = pathname.replace(/^\/api/, "");
