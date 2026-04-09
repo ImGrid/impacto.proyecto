@@ -5,7 +5,7 @@ const API_URL = process.env.API_URL!;
 
 const cookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
+  secure: false,
   sameSite: "lax" as const,
   path: "/",
 };
