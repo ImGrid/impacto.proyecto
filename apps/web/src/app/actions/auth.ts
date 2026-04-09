@@ -40,6 +40,8 @@ export async function login(
 
     const data = await response.json();
 
+    console.log("[AUTH] Login OK. API_URL:", API_URL, "| has access_token:", !!data.access_token, "| has refresh_token:", !!data.refresh_token);
+
     // Guardar tokens en cookies httpOnly
     const cookieStore = await cookies();
 
@@ -52,7 +54,10 @@ export async function login(
       ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60,
     });
-  } catch {
+
+    console.log("[AUTH] Cookies set. Redirecting to:", callbackUrl);
+  } catch (err) {
+    console.log("[AUTH] CATCH ERROR:", err);
     return { error: "No se pudo conectar con el servidor. Intente más tarde." };
   }
 
