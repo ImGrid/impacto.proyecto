@@ -1,0 +1,490 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model acopiador {
+  id                Int           @id @default(autoincrement())
+  usuario_id        Int           @unique
+  nombre_completo   String        @db.VarChar(150)
+  cedula_identidad  String        @unique @db.VarChar(20)
+  celular           String        @db.VarChar(20)
+  tipo_acopio       tipo_acopio
+  nombre_punto      String        @db.VarChar(150)
+  direccion         String?       @db.VarChar(255)
+  latitud           Decimal?      @db.Decimal(10, 8)
+  longitud          Decimal?      @db.Decimal(11, 8)
+  zona_id           Int
+  horario_operacion String?       @db.VarChar(100)
+  activo            Boolean       @default(true)
+  fecha_creacion    DateTime      @default(now()) @db.Timestamp(6)
+  usuario           usuario       @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  zona              zona          @relation(fields: [zona_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  codigo_qr         codigo_qr[]
+  pago              pago[]
+  recolector        recolector[]
+  transaccion       transaccion[]
+
+  @@index([cedula_identidad], map: "idx_acopiador_cedula")
+  @@index([usuario_id], map: "idx_acopiador_usuario")
+  @@index([zona_id], map: "idx_acopiador_zona")
+}
+
+model administrador {
+  id              Int      @id @default(autoincrement())
+  usuario_id      Int      @unique
+  nombre_completo String   @db.VarChar(150)
+  telefono        String   @db.VarChar(20)
+  fecha_creacion  DateTime @default(now()) @db.Timestamp(6)
+  usuario         usuario  @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  evento          evento[]
+
+  @@index([usuario_id], map: "idx_administrador_usuario")
+}
+
+model asociacion {
+  id             Int          @id @default(autoincrement())
+  nombre         String       @db.VarChar(150)
+  representante  String?      @db.VarChar(150)
+  telefono       String?      @db.VarChar(20)
+  direccion      String?      @db.VarChar(255)
+  activo         Boolean      @default(true)
+  fecha_creacion DateTime     @default(now()) @db.Timestamp(6)
+  recolector     recolector[]
+}
+
+model codigo_qr {
+  id              Int            @id @default(autoincrement())
+  codigo          String         @unique @db.VarChar(100)
+  estado          estado_qr      @default(CREADO)
+  generado_por_id Int
+  transaccion_id  Int?
+  fecha_creacion  DateTime       @default(now()) @db.Timestamp(6)
+  acopiador       acopiador      @relation(fields: [generado_por_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transaccion     transaccion?   @relation(fields: [transaccion_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  historial_qr    historial_qr[]
+
+  @@index([codigo], map: "idx_qr_codigo")
+  @@index([estado], map: "idx_qr_estado")
+  @@index([generado_por_id], map: "idx_qr_generador")
+  @@index([transaccion_id], map: "idx_qr_transaccion")
+}
+
+model detalle_transaccion {
+  id              Int           @id @default(autoincrement())
+  transaccion_id  Int
+  material_id     Int
+  cantidad        Decimal       @db.Decimal(10, 2)
+  unidad_medida   unidad_medida
+  precio_unitario Decimal       @db.Decimal(10, 2)
+  subtotal        Decimal       @db.Decimal(10, 2)
+  material        material      @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transaccion     transaccion   @relation(fields: [transaccion_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([material_id], map: "idx_detalle_material")
+  @@index([transaccion_id], map: "idx_detalle_transaccion")
+}
+
+model evento {
+  id             Int            @id @default(autoincrement())
+  titulo         String         @db.VarChar(200)
+  descripcion    String?
+  zona_id        Int
+  direccion      String?        @db.VarChar(255)
+  latitud        Decimal?       @db.Decimal(10, 8)
+  longitud       Decimal?       @db.Decimal(11, 8)
+  fecha_evento   DateTime       @db.Date
+  hora_inicio    DateTime?      @db.Time(6)
+  hora_fin       DateTime?      @db.Time(6)
+  creado_por_id  Int
+  activo         Boolean        @default(true)
+  fecha_creacion DateTime       @default(now()) @db.Timestamp(6)
+  administrador  administrador  @relation(fields: [creado_por_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zona           zona           @relation(fields: [zona_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  notificacion   notificacion[]
+
+  @@index([creado_por_id], map: "idx_evento_creador")
+  @@index([fecha_evento], map: "idx_evento_fecha")
+  @@index([zona_id], map: "idx_evento_zona")
+}
+
+model generador {
+  id                Int            @id @default(autoincrement())
+  usuario_id        Int            @unique
+  razon_social      String         @db.VarChar(200)
+  tipo_generador_id Int
+  contacto_nombre   String         @db.VarChar(150)
+  contacto_telefono String         @db.VarChar(20)
+  contacto_email    String?        @db.VarChar(150)
+  activo            Boolean        @default(true)
+  fecha_creacion    DateTime       @default(now()) @db.Timestamp(6)
+  latitud           Decimal?       @db.Decimal(10, 8)
+  longitud          Decimal?       @db.Decimal(11, 8)
+  tipo_generador    tipo_generador @relation(fields: [tipo_generador_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  usuario           usuario        @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  sucursal          sucursal[]
+
+  @@index([tipo_generador_id], map: "idx_generador_tipo")
+  @@index([usuario_id], map: "idx_generador_usuario")
+}
+
+model historial_qr {
+  id           Int       @id @default(autoincrement())
+  codigo_qr_id Int
+  usuario_id   Int
+  accion       accion_qr
+  latitud      Decimal?  @db.Decimal(10, 8)
+  longitud     Decimal?  @db.Decimal(11, 8)
+  fecha        DateTime  @default(now()) @db.Timestamp(6)
+  codigo_qr    codigo_qr @relation(fields: [codigo_qr_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  usuario      usuario   @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([fecha], map: "idx_historial_fecha")
+  @@index([codigo_qr_id], map: "idx_historial_qr")
+  @@index([usuario_id], map: "idx_historial_usuario")
+}
+
+model material {
+  id                    Int                   @id @default(autoincrement())
+  nombre                String                @db.VarChar(100)
+  descripcion           String?
+  unidad_medida_default unidad_medida         @default(KG)
+  factor_co2            Decimal?              @db.Decimal(10, 4)
+  activo                Boolean               @default(true)
+  fecha_creacion        DateTime              @default(now()) @db.Timestamp(6)
+  detalle_transaccion   detalle_transaccion[]
+  precio_material       precio_material[]
+  recolector_material   recolector_material[]
+  sucursal_material     sucursal_material[]
+}
+
+model notificacion {
+  id                                        Int               @id @default(autoincrement())
+  tipo                                      tipo_notificacion
+  emisor_id                                 Int
+  receptor_id                               Int?
+  zona_id                                   Int?
+  evento_id                                 Int?
+  titulo                                    String            @db.VarChar(200)
+  mensaje                                   String?
+  leida                                     Boolean           @default(false)
+  fecha_creacion                            DateTime          @default(now()) @db.Timestamp(6)
+  fecha_lectura                             DateTime?         @db.Timestamp(6)
+  usuario_notificacion_emisor_idTousuario   usuario           @relation("notificacion_emisor_idTousuario", fields: [emisor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  evento                                    evento?           @relation(fields: [evento_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  usuario_notificacion_receptor_idTousuario usuario?          @relation("notificacion_receptor_idTousuario", fields: [receptor_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zona                                      zona?             @relation(fields: [zona_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([emisor_id], map: "idx_notificacion_emisor")
+  @@index([evento_id], map: "idx_notificacion_evento")
+  @@index([leida], map: "idx_notificacion_leida")
+  @@index([receptor_id], map: "idx_notificacion_receptor")
+  @@index([tipo], map: "idx_notificacion_tipo")
+  @@index([zona_id], map: "idx_notificacion_zona")
+}
+
+model pago {
+  id               Int                @id @default(autoincrement())
+  recolector_id    Int
+  acopiador_id     Int
+  monto_total      Decimal            @db.Decimal(10, 2)
+  fecha_pago       DateTime           @db.Date
+  observaciones    String?
+  fecha_creacion   DateTime           @default(now()) @db.Timestamp(6)
+  acopiador        acopiador          @relation(fields: [acopiador_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  recolector       recolector         @relation(fields: [recolector_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  pago_transaccion pago_transaccion[]
+
+  @@index([acopiador_id], map: "idx_pago_acopiador")
+  @@index([fecha_pago], map: "idx_pago_fecha")
+  @@index([recolector_id], map: "idx_pago_recolector")
+}
+
+model pago_transaccion {
+  id             Int         @id @default(autoincrement())
+  pago_id        Int
+  transaccion_id Int         @unique
+  pago           pago        @relation(fields: [pago_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  transaccion    transaccion @relation(fields: [transaccion_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([pago_id], map: "idx_pago_transaccion_pago")
+  @@index([transaccion_id], map: "idx_pago_transaccion_trans")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model recolector {
+  id                        Int                         @id @default(autoincrement())
+  usuario_id                Int                         @unique
+  nombre_completo           String                      @db.VarChar(150)
+  cedula_identidad          String                      @unique @db.VarChar(20)
+  celular                   String                      @db.VarChar(20)
+  direccion_domicilio       String                      @db.VarChar(255)
+  latitud                   Decimal                     @db.Decimal(10, 8)
+  longitud                  Decimal                     @db.Decimal(11, 8)
+  acopiador_id              Int
+  zona_id                   Int
+  asociacion_id             Int?
+  genero                    genero
+  edad                      Int
+  trabaja_individual        Boolean                     @default(true)
+  activo                    Boolean                     @default(true)
+  fecha_creacion            DateTime                    @default(now()) @db.Timestamp(6)
+  pago                      pago[]
+  acopiador                 acopiador                   @relation(fields: [acopiador_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  asociacion                asociacion?                 @relation(fields: [asociacion_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  usuario                   usuario                     @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  zona                      zona                        @relation(fields: [zona_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  recolector_dia_trabajo    recolector_dia_trabajo[]
+  recolector_material       recolector_material[]
+  recolector_tipo_generador recolector_tipo_generador[]
+  transaccion               transaccion[]
+
+  @@index([acopiador_id], map: "idx_recolector_acopiador")
+  @@index([asociacion_id], map: "idx_recolector_asociacion")
+  @@index([cedula_identidad], map: "idx_recolector_cedula")
+  @@index([latitud, longitud], map: "idx_recolector_ubicacion")
+  @@index([usuario_id], map: "idx_recolector_usuario")
+  @@index([zona_id], map: "idx_recolector_zona")
+}
+
+model recolector_dia_trabajo {
+  id            Int        @id @default(autoincrement())
+  recolector_id Int
+  dia_semana    dia_semana
+  recolector    recolector @relation(fields: [recolector_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([recolector_id, dia_semana])
+  @@index([recolector_id], map: "idx_recolector_dia_recolector")
+}
+
+model recolector_material {
+  id               Int        @id @default(autoincrement())
+  recolector_id    Int
+  material_id      Int
+  cantidad_mensual Decimal?   @db.Decimal(10, 2)
+  precio_venta     Decimal?   @db.Decimal(10, 2)
+  es_principal     Boolean    @default(false)
+  material         material   @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  recolector       recolector @relation(fields: [recolector_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([recolector_id, material_id])
+  @@index([material_id], map: "idx_recolector_material_material")
+  @@index([recolector_id], map: "idx_recolector_material_recolector")
+}
+
+model recolector_tipo_generador {
+  id                Int            @id @default(autoincrement())
+  recolector_id     Int
+  tipo_generador_id Int
+  recolector        recolector     @relation(fields: [recolector_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tipo_generador    tipo_generador @relation(fields: [tipo_generador_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([recolector_id, tipo_generador_id])
+  @@index([recolector_id], map: "idx_recolector_tipo_gen_recolector")
+}
+
+model sucursal {
+  id                Int                 @id @default(autoincrement())
+  generador_id      Int
+  nombre            String              @db.VarChar(150)
+  direccion         String              @db.VarChar(255)
+  latitud           Decimal             @db.Decimal(10, 8)
+  longitud          Decimal             @db.Decimal(11, 8)
+  zona_id           Int
+  horario_recojo    String?             @db.VarChar(100)
+  frecuencia        frecuencia_recojo?
+  activo            Boolean             @default(true)
+  fecha_creacion    DateTime            @default(now()) @db.Timestamp(6)
+  generador         generador           @relation(fields: [generador_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  zona              zona                @relation(fields: [zona_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sucursal_material sucursal_material[]
+  transaccion       transaccion[]
+
+  @@index([generador_id], map: "idx_sucursal_generador")
+  @@index([latitud, longitud], map: "idx_sucursal_ubicacion")
+  @@index([zona_id], map: "idx_sucursal_zona")
+}
+
+model sucursal_material {
+  id                  Int      @id @default(autoincrement())
+  sucursal_id         Int
+  material_id         Int
+  cantidad_aproximada String?  @db.VarChar(100)
+  material            material @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sucursal            sucursal @relation(fields: [sucursal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([sucursal_id, material_id])
+  @@index([sucursal_id], map: "idx_sucursal_material_sucursal")
+}
+
+model tipo_generador {
+  id                        Int                         @id @default(autoincrement())
+  nombre                    String                      @db.VarChar(100)
+  descripcion               String?
+  activo                    Boolean                     @default(true)
+  fecha_creacion            DateTime                    @default(now()) @db.Timestamp(6)
+  generador                 generador[]
+  recolector_tipo_generador recolector_tipo_generador[]
+}
+
+model transaccion {
+  id                  Int                   @id @default(autoincrement())
+  fecha               DateTime              @db.Date
+  hora                DateTime              @db.Time(6)
+  recolector_id       Int
+  acopiador_id        Int
+  sucursal_id         Int?
+  zona_id             Int
+  monto_total         Decimal               @default(0) @db.Decimal(10, 2)
+  observaciones       String?
+  fecha_creacion      DateTime              @default(now()) @db.Timestamp(6)
+  codigo_qr           codigo_qr[]
+  detalle_transaccion detalle_transaccion[]
+  pago_transaccion    pago_transaccion?
+  acopiador           acopiador             @relation(fields: [acopiador_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  recolector          recolector            @relation(fields: [recolector_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sucursal            sucursal?             @relation(fields: [sucursal_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zona                zona                  @relation(fields: [zona_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([acopiador_id], map: "idx_transaccion_acopiador")
+  @@index([fecha], map: "idx_transaccion_fecha")
+  @@index([recolector_id], map: "idx_transaccion_recolector")
+  @@index([sucursal_id], map: "idx_transaccion_sucursal")
+  @@index([zona_id], map: "idx_transaccion_zona")
+}
+
+model usuario {
+  id                                             Int              @id @default(autoincrement())
+  email                                          String           @unique @db.VarChar(150)
+  password_hash                                  String           @db.VarChar(255)
+  rol                                            rol_usuario
+  activo                                         Boolean          @default(true)
+  fecha_creacion                                 DateTime         @default(now()) @db.Timestamp(6)
+  acopiador                                      acopiador?
+  administrador                                  administrador?
+  generador                                      generador?
+  historial_qr                                   historial_qr[]
+  notificacion_notificacion_emisor_idTousuario   notificacion[]   @relation("notificacion_emisor_idTousuario")
+  notificacion_notificacion_receptor_idTousuario notificacion[]   @relation("notificacion_receptor_idTousuario")
+  recolector                                     recolector?
+  sesion_refresh                                 sesion_refresh[]
+
+  @@index([email], map: "idx_usuario_email")
+  @@index([rol], map: "idx_usuario_rol")
+}
+
+model zona {
+  id             Int            @id @default(autoincrement())
+  nombre         String         @db.VarChar(100)
+  descripcion    String?
+  activo         Boolean        @default(true)
+  fecha_creacion DateTime       @default(now()) @db.Timestamp(6)
+  latitud        Decimal?       @db.Decimal(10, 8)
+  longitud       Decimal?       @db.Decimal(11, 8)
+  radio_km       Decimal?       @db.Decimal(5, 2)
+  acopiador      acopiador[]
+  evento         evento[]
+  notificacion   notificacion[]
+  recolector     recolector[]
+  sucursal       sucursal[]
+  transaccion    transaccion[]
+}
+
+model sesion_refresh {
+  id          Int      @id @default(autoincrement())
+  usuario_id  Int
+  token_hash  String   @db.VarChar(64)
+  dispositivo String?  @db.VarChar(150)
+  expira_en   DateTime @db.Timestamp(6)
+  creado_en   DateTime @default(now()) @db.Timestamp(6)
+  usuario     usuario  @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([token_hash], map: "idx_sesion_refresh_hash")
+  @@index([usuario_id], map: "idx_sesion_refresh_usuario")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model precio_material {
+  id             Int       @id @default(autoincrement())
+  material_id    Int
+  precio_minimo  Decimal   @db.Decimal(10, 2)
+  precio_maximo  Decimal   @db.Decimal(10, 2)
+  fecha_inicio   DateTime  @db.Date
+  fecha_fin      DateTime? @db.Date
+  fecha_creacion DateTime  @default(now()) @db.Timestamp(6)
+  material       material  @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([material_id, fecha_inicio])
+  @@index([material_id], map: "idx_precio_material_material")
+  @@index([material_id, fecha_inicio, fecha_fin], map: "idx_precio_material_vigencia")
+}
+
+enum accion_qr {
+  GENERADO
+  ESCANEADO_RECOLECTOR
+  ESCANEADO_ACOPIADOR
+  VERIFICADO
+  ANULADO
+}
+
+enum dia_semana {
+  LUNES
+  MARTES
+  MIERCOLES
+  JUEVES
+  VIERNES
+  SABADO
+  DOMINGO
+}
+
+enum estado_qr {
+  CREADO
+  EN_RECOLECCION
+  ENTREGADO
+  VERIFICADO
+  ANULADO
+}
+
+enum frecuencia_recojo {
+  DIARIO
+  SEMANAL
+  QUINCENAL
+  MENSUAL
+  BAJO_DEMANDA
+}
+
+enum genero {
+  HOMBRE
+  MUJER
+  NO_ESPECIFICA
+}
+
+enum rol_usuario {
+  ADMIN
+  RECOLECTOR
+  ACOPIADOR
+  GENERADOR
+}
+
+enum tipo_acopio {
+  FIJO
+  MOVIL
+}
+
+enum tipo_notificacion {
+  RESIDUOS_DISPONIBLES
+  SOLICITUD_RECOJO
+  EVENTO
+  SISTEMA
+  GENERAL
+}
+
+enum unidad_medida {
+  KG
+  UNIDAD
+  BOLSA
+  TONELADA
+}

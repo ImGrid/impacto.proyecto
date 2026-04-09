@@ -1,0 +1,530 @@
+"use client";
+
+import { useEffect } from "react";
+import { useForm, useFieldArray } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod/v4";
+import { Loader2, Plus, Trash2 } from "lucide-react";
+import { useCreateSucursal, useUpdateSucursal } from "@/hooks/use-sucursales";
+import { useGeneradores } from "@/hooks/use-generadores";
+import { useZonas } from "@/hooks/use-zonas";
+import { useMateriales } from "@/hooks/use-materiales";
+import type { Sucursal, FrecuenciaRecojo } from "@/types/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+
+const materialRowSchema = z.object({
+  material_id: z.string().min(1, "Seleccione un material"),
+  cantidad_aproximada: z.string().optional(),
+});
+
+const formSchema = z.object({
+  generador_id: z.string().min(1, "Seleccione un generador"),
+  nombre: z
+    .string()
+    .min(1, "El nombre es obligatorio")
+    .max(150, "Máximo 150 caracteres"),
+  direccion: z
+    .string()
+    .min(1, "La dirección es obligatoria")
+    .max(255, "Máximo 255 caracteres"),
+  latitud: z.string().min(1, "La latitud es obligatoria"),
+  longitud: z.string().min(1, "La longitud es obligatoria"),
+  zona_id: z.string().min(1, "Seleccione una zona"),
+  horario_recojo: z.string().optional(),
+  frecuencia: z.string().optional(),
+  materiales: z.array(materialRowSchema).optional(),
+});
+
+type FormValues = z.infer<typeof formSchema>;
+
+const frecuenciaOptions = [
+  { value: "DIARIO", label: "Diario" },
+  { value: "SEMANAL", label: "Semanal" },
+  { value: "QUINCENAL", label: "Quincenal" },
+  { value: "MENSUAL", label: "Mensual" },
+  { value: "BAJO_DEMANDA", label: "Bajo demanda" },
+];
+
+interface SucursalFormDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  sucursal?: Sucursal;
+}
+
+export function SucursalFormDialog({
+  open,
+  onOpenChange,
+  sucursal,
+}: SucursalFormDialogProps) {
+  const isEditing = !!sucursal;
+  const createMutation = useCreateSucursal();
+  const updateMutation = useUpdateSucursal();
+  const isPending = createMutation.isPending || updateMutation.isPending;
+
+  const { data: generadoresData, isLoading: generadoresLoading } =
+    useGeneradores({ limit: 100 });
+  const generadores = generadoresData?.data ?? [];
+
+  const { data: zonasData, isLoading: zonasLoading } = useZonas({
+    limit: 100,
+  });
+  const zonas = zonasData?.data ?? [];
+
+  const { data: materialesData, isLoading: materialesLoading } = useMateriales({
+    limit: 100,
+  });
+  const materialesCatalogo = materialesData?.data ?? [];
+
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      generador_id: "",
+      nombre: "",
+      direccion: "",
+      latitud: "",
+      longitud: "",
+      zona_id: "",
+      horario_recojo: "",
+      frecuencia: "",
+      materiales: [],
+    },
+  });
+
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: "materiales",
+  });
+
+  useEffect(() => {
+    if (open) {
+      if (isEditing) {
+        form.reset({
+          generador_id: String(sucursal.generador_id),
+          nombre: sucursal.nombre,
+          direccion: sucursal.direccion,
+          latitud: String(sucursal.latitud),
+          longitud: String(sucursal.longitud),
+          zona_id: String(sucursal.zona_id),
+          horario_recojo: sucursal.horario_recojo ?? "",
+          frecuencia: sucursal.frecuencia ?? "",
+          materiales: sucursal.sucursal_material.map((sm) => ({
+            material_id: String(sm.material_id),
+            cantidad_aproximada: sm.cantidad_aproximada ?? "",
+          })),
+        });
+      } else {
+        form.reset({
+          generador_id: "",
+          nombre: "",
+          direccion: "",
+          latitud: "",
+          longitud: "",
+          zona_id: "",
+          horario_recojo: "",
+          frecuencia: "",
+          materiales: [],
+        });
+      }
+    }
+  }, [open, sucursal, isEditing, form]);
+
+  function onSubmit(data: FormValues) {
+    const materiales = data.materiales?.length
+      ? data.materiales.map((m) => ({
+          material_id: Number(m.material_id),
+          ...(m.cantidad_aproximada
+            ? { cantidad_aproximada: m.cantidad_aproximada }
+            : {}),
+        }))
+      : undefined;
+
+    const shared = {
+      nombre: data.nombre,
+      direccion: data.direccion,
+      latitud: Number(data.latitud),
+      longitud: Number(data.longitud),
+      zona_id: Number(data.zona_id),
+      ...(data.horario_recojo ? { horario_recojo: data.horario_recojo } : {}),
+      ...(data.frecuencia
+        ? { frecuencia: data.frecuencia as FrecuenciaRecojo }
+        : {}),
+      ...(materiales !== undefined ? { materiales } : {}),
+    };
+
+    if (isEditing) {
+      updateMutation.mutate(
+        { id: sucursal.id, data: shared },
+        { onSuccess: () => onOpenChange(false) },
+      );
+    } else {
+      createMutation.mutate(
+        { generador_id: Number(data.generador_id), ...shared },
+        { onSuccess: () => onOpenChange(false) },
+      );
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {isEditing ? "Editar sucursal" : "Crear sucursal"}
+          </DialogTitle>
+          <DialogDescription>
+            {isEditing
+              ? "Modifique los datos de la sucursal."
+              : "Complete los datos para registrar una nueva sucursal."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="generador_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Generador</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value}
+                    disabled={isPending || generadoresLoading || isEditing}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue
+                          placeholder={
+                            generadoresLoading
+                              ? "Cargando generadores..."
+                              : "Seleccionar generador"
+                          }
+                        />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {generadores.map((gen) => (
+                        <SelectItem key={gen.id} value={String(gen.id)}>
+                          {gen.razon_social}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {isEditing && (
+                    <p className="text-muted-foreground text-xs">
+                      El generador no se puede cambiar.
+                    </p>
+                  )}
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="nombre"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nombre de la sucursal</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Nombre del punto de recogida"
+                      disabled={isPending}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="direccion"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Dirección</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Dirección de la sucursal"
+                      disabled={isPending}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="latitud"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Latitud</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="-17.3935"
+                        disabled={isPending}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="longitud"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Longitud</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="any"
+                        placeholder="-66.1570"
+                        disabled={isPending}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="zona_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Zona</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                      disabled={isPending || zonasLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue
+                            placeholder={
+                              zonasLoading
+                                ? "Cargando zonas..."
+                                : "Seleccionar zona"
+                            }
+                          />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {zonas.map((zona) => (
+                          <SelectItem key={zona.id} value={String(zona.id)}>
+                            {zona.nombre}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="frecuencia"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Frecuencia (opcional)</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                      disabled={isPending}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Seleccionar frecuencia" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {frecuenciaOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <FormField
+              control={form.control}
+              name="horario_recojo"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Horario de recojo (opcional)</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="Ej: Lun-Vie 8:00-12:00"
+                      disabled={isPending}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Sección dinámica de materiales */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <FormLabel>Materiales (opcional)</FormLabel>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    append({ material_id: "", cantidad_aproximada: "" })
+                  }
+                  disabled={isPending}
+                >
+                  <Plus className="mr-1 h-3 w-3" />
+                  Agregar
+                </Button>
+              </div>
+
+              {fields.length === 0 && (
+                <p className="text-muted-foreground text-sm">
+                  No se han agregado materiales.
+                </p>
+              )}
+
+              {fields.map((field, index) => (
+                <div key={field.id} className="flex items-start gap-2">
+                  <FormField
+                    control={form.control}
+                    name={`materiales.${index}.material_id`}
+                    render={({ field: selectField }) => (
+                      <FormItem className="flex-1">
+                        <Select
+                          onValueChange={selectField.onChange}
+                          value={selectField.value}
+                          disabled={isPending || materialesLoading}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue
+                                placeholder={
+                                  materialesLoading
+                                    ? "Cargando..."
+                                    : "Material"
+                                }
+                              />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {materialesCatalogo.map((mat) => (
+                              <SelectItem
+                                key={mat.id}
+                                value={String(mat.id)}
+                              >
+                                {mat.nombre}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name={`materiales.${index}.cantidad_aproximada`}
+                    render={({ field: inputField }) => (
+                      <FormItem className="w-32">
+                        <FormControl>
+                          <Input
+                            placeholder="Cantidad"
+                            disabled={isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => remove(index)}
+                    disabled={isPending}
+                    className="mt-0.5"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={isPending}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isPending}>
+                {isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Guardando...
+                  </>
+                ) : isEditing ? (
+                  "Guardar cambios"
+                ) : (
+                  "Crear sucursal"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}

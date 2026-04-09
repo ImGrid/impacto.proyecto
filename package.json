@@ -1,0 +1,26 @@
+{
+  "name": "triple-impacto",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema Web de Gestión de Información de Residuos Reciclables - Triple Impacto",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "dev:api": "turbo run dev --filter=api",
+    "dev:web": "turbo run dev --filter=web",
+    "build:api": "turbo run build --filter=api",
+    "build:web": "turbo run build --filter=web",
+    "db:pull": "pnpm --filter database db:pull",
+    "db:generate": "pnpm --filter database db:generate",
+    "db:studio": "pnpm --filter database db:studio",
+    "db:seed": "pnpm --filter database db:seed"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "turbo": "^2.8.7"
+  }
+}

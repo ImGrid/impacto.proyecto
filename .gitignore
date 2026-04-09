@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build
+dist/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Prisma
+packages/database/prisma/generated/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Turbo
+.turbo/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Documentation (internal)
+docs/
+
+# Text files (internal notes)
+*.txt
+
+# Temporary files
+tmp_token.json
+
+# Graphics source files
+Graficos_Tiple Impacto_Carpeta/
+
+# Screenshots/internal images
+images/

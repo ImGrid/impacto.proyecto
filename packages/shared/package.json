@@ -1,0 +1,8 @@
+{
+  "name": "shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tipos e interfaces TypeScript compartidas entre api y web",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}

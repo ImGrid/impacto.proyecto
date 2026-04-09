@@ -1,0 +1,52 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  ParseIntPipe,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { rol_usuario } from '@prisma/client';
+import { Roles } from '../auth/decorators';
+import { MaterialesService } from './materiales.service';
+import { CreateMaterialDto, UpdateMaterialDto, MaterialQueryDto } from './dto';
+
+@Controller('materiales')
+@Roles(rol_usuario.ADMIN)
+export class MaterialesController {
+  constructor(private readonly materialesService: MaterialesService) {}
+
+  @Post()
+  create(@Body() dto: CreateMaterialDto) {
+    return this.materialesService.create(dto);
+  }
+
+  @Get()
+  findAll(@Query() query: MaterialQueryDto) {
+    return this.materialesService.findAll(query);
+  }
+
+  @Get(':id')
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.materialesService.findOne(id);
+  }
+
+  @Patch(':id')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateMaterialDto,
+  ) {
+    return this.materialesService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.materialesService.hardDelete(id);
+  }
+}
