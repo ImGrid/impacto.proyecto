@@ -9,7 +9,7 @@ import { useCreateSucursal, useUpdateSucursal } from "@/hooks/use-sucursales";
 import { useGeneradores } from "@/hooks/use-generadores";
 import { useZonas } from "@/hooks/use-zonas";
 import { useMateriales } from "@/hooks/use-materiales";
-import type { Sucursal, FrecuenciaRecojo } from "@/types/api";
+import type { Sucursal, DiaSemana } from "@/types/api";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +41,12 @@ const materialRowSchema = z.object({
   cantidad_aproximada: z.string().optional(),
 });
 
+const horarioRowSchema = z.object({
+  dia_semana: z.string().min(1, "Seleccione un día"),
+  hora_inicio: z.string().min(1, "Hora inicio requerida"),
+  hora_fin: z.string().min(1, "Hora fin requerida"),
+});
+
 const formSchema = z.object({
   generador_id: z.string().min(1, "Seleccione un generador"),
   nombre: z
@@ -54,20 +60,26 @@ const formSchema = z.object({
   latitud: z.string().min(1, "La latitud es obligatoria"),
   longitud: z.string().min(1, "La longitud es obligatoria"),
   zona_id: z.string().min(1, "Seleccione una zona"),
-  horario_recojo: z.string().optional(),
-  frecuencia: z.string().optional(),
   materiales: z.array(materialRowSchema).optional(),
+  horarios: z.array(horarioRowSchema).optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
 
-const frecuenciaOptions = [
-  { value: "DIARIO", label: "Diario" },
-  { value: "SEMANAL", label: "Semanal" },
-  { value: "QUINCENAL", label: "Quincenal" },
-  { value: "MENSUAL", label: "Mensual" },
-  { value: "BAJO_DEMANDA", label: "Bajo demanda" },
+const diasSemana: { value: DiaSemana; label: string }[] = [
+  { value: "LUNES", label: "Lunes" },
+  { value: "MARTES", label: "Martes" },
+  { value: "MIERCOLES", label: "Miércoles" },
+  { value: "JUEVES", label: "Jueves" },
+  { value: "VIERNES", label: "Viernes" },
+  { value: "SABADO", label: "Sábado" },
+  { value: "DOMINGO", label: "Domingo" },
 ];
+
+function formatTimeFromISO(isoTime: string): string {
+  const date = new Date(isoTime);
+  return date.toISOString().substring(11, 16);
+}
 
 interface SucursalFormDialogProps {
   open: boolean;
@@ -108,15 +120,19 @@ export function SucursalFormDialog({
       latitud: "",
       longitud: "",
       zona_id: "",
-      horario_recojo: "",
-      frecuencia: "",
       materiales: [],
+      horarios: [],
     },
   });
 
-  const { fields, append, remove } = useFieldArray({
+  const materialesFields = useFieldArray({
     control: form.control,
     name: "materiales",
+  });
+
+  const horariosFields = useFieldArray({
+    control: form.control,
+    name: "horarios",
   });
 
   useEffect(() => {
@@ -129,11 +145,14 @@ export function SucursalFormDialog({
           latitud: String(sucursal.latitud),
           longitud: String(sucursal.longitud),
           zona_id: String(sucursal.zona_id),
-          horario_recojo: sucursal.horario_recojo ?? "",
-          frecuencia: sucursal.frecuencia ?? "",
           materiales: sucursal.sucursal_material.map((sm) => ({
             material_id: String(sm.material_id),
             cantidad_aproximada: sm.cantidad_aproximada ?? "",
+          })),
+          horarios: (sucursal.sucursal_horario ?? []).map((h) => ({
+            dia_semana: h.dia_semana,
+            hora_inicio: formatTimeFromISO(h.hora_inicio),
+            hora_fin: formatTimeFromISO(h.hora_fin),
           })),
         });
       } else {
@@ -144,9 +163,8 @@ export function SucursalFormDialog({
           latitud: "",
           longitud: "",
           zona_id: "",
-          horario_recojo: "",
-          frecuencia: "",
           materiales: [],
+          horarios: [],
         });
       }
     }
@@ -162,17 +180,22 @@ export function SucursalFormDialog({
         }))
       : undefined;
 
+    const horarios = data.horarios?.length
+      ? data.horarios.map((h) => ({
+          dia_semana: h.dia_semana as DiaSemana,
+          hora_inicio: h.hora_inicio,
+          hora_fin: h.hora_fin,
+        }))
+      : undefined;
+
     const shared = {
       nombre: data.nombre,
       direccion: data.direccion,
       latitud: Number(data.latitud),
       longitud: Number(data.longitud),
       zona_id: Number(data.zona_id),
-      ...(data.horario_recojo ? { horario_recojo: data.horario_recojo } : {}),
-      ...(data.frecuencia
-        ? { frecuencia: data.frecuencia as FrecuenciaRecojo }
-        : {}),
       ...(materiales !== undefined ? { materiales } : {}),
+      ...(horarios !== undefined ? { horarios } : {}),
     };
 
     if (isEditing) {
@@ -322,89 +345,146 @@ export function SucursalFormDialog({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="zona_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Zona</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                      disabled={isPending || zonasLoading}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue
-                            placeholder={
-                              zonasLoading
-                                ? "Cargando zonas..."
-                                : "Seleccionar zona"
-                            }
-                          />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {zonas.map((zona) => (
-                          <SelectItem key={zona.id} value={String(zona.id)}>
-                            {zona.nombre}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="frecuencia"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Frecuencia (opcional)</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                      disabled={isPending}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccionar frecuencia" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {frecuenciaOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
             <FormField
               control={form.control}
-              name="horario_recojo"
+              name="zona_id"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Horario de recojo (opcional)</FormLabel>
-                  <FormControl>
-                    <Input
-                      placeholder="Ej: Lun-Vie 8:00-12:00"
-                      disabled={isPending}
-                      {...field}
-                    />
-                  </FormControl>
+                  <FormLabel>Zona</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value}
+                    disabled={isPending || zonasLoading}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue
+                          placeholder={
+                            zonasLoading
+                              ? "Cargando zonas..."
+                              : "Seleccionar zona"
+                          }
+                        />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {zonas.map((zona) => (
+                        <SelectItem key={zona.id} value={String(zona.id)}>
+                          {zona.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <FormMessage />
                 </FormItem>
               )}
             />
+
+            {/* Sección de horarios de recogida */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <FormLabel>Horarios de recogida (opcional)</FormLabel>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    horariosFields.append({
+                      dia_semana: "",
+                      hora_inicio: "08:00",
+                      hora_fin: "12:00",
+                    })
+                  }
+                  disabled={isPending}
+                >
+                  <Plus className="mr-1 h-3 w-3" />
+                  Agregar día
+                </Button>
+              </div>
+
+              {horariosFields.fields.length === 0 && (
+                <p className="text-muted-foreground text-sm">
+                  No se han definido horarios de recogida.
+                </p>
+              )}
+
+              {horariosFields.fields.map((field, index) => (
+                <div key={field.id} className="flex items-start gap-2">
+                  <FormField
+                    control={form.control}
+                    name={`horarios.${index}.dia_semana`}
+                    render={({ field: selectField }) => (
+                      <FormItem className="flex-1">
+                        <Select
+                          onValueChange={selectField.onChange}
+                          value={selectField.value}
+                          disabled={isPending}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Día" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {diasSemana.map((dia) => (
+                              <SelectItem key={dia.value} value={dia.value}>
+                                {dia.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name={`horarios.${index}.hora_inicio`}
+                    render={({ field: inputField }) => (
+                      <FormItem className="w-28">
+                        <FormControl>
+                          <Input
+                            type="time"
+                            disabled={isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name={`horarios.${index}.hora_fin`}
+                    render={({ field: inputField }) => (
+                      <FormItem className="w-28">
+                        <FormControl>
+                          <Input
+                            type="time"
+                            disabled={isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => horariosFields.remove(index)}
+                    disabled={isPending}
+                    className="mt-0.5"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
 
             {/* Sección dinámica de materiales */}
             <div className="space-y-3">
@@ -415,7 +495,10 @@ export function SucursalFormDialog({
                   variant="outline"
                   size="sm"
                   onClick={() =>
-                    append({ material_id: "", cantidad_aproximada: "" })
+                    materialesFields.append({
+                      material_id: "",
+                      cantidad_aproximada: "",
+                    })
                   }
                   disabled={isPending}
                 >
@@ -424,13 +507,13 @@ export function SucursalFormDialog({
                 </Button>
               </div>
 
-              {fields.length === 0 && (
+              {materialesFields.fields.length === 0 && (
                 <p className="text-muted-foreground text-sm">
                   No se han agregado materiales.
                 </p>
               )}
 
-              {fields.map((field, index) => (
+              {materialesFields.fields.map((field, index) => (
                 <div key={field.id} className="flex items-start gap-2">
                   <FormField
                     control={form.control}
@@ -490,7 +573,7 @@ export function SucursalFormDialog({
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    onClick={() => remove(index)}
+                    onClick={() => materialesFields.remove(index)}
                     disabled={isPending}
                     className="mt-0.5"
                   >

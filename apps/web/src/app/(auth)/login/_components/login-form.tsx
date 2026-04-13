@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/form";
 
 const loginSchema = z.object({
-  email: z.email("Ingrese un email válido"),
+  identificador: z.string().min(1, "Ingrese su email, CI o teléfono"),
   password: z.string().min(6, "Mínimo 6 caracteres"),
 });
 
@@ -38,7 +38,7 @@ export function LoginForm() {
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: "",
+      identificador: "",
       password: "",
     },
   });
@@ -52,7 +52,7 @@ export function LoginForm() {
 
   function onSubmit(data: LoginFormValues) {
     const formData = new FormData();
-    formData.append("email", data.email);
+    formData.append("identificador", data.identificador);
     formData.append("password", data.password);
     formData.append("callbackUrl", callbackUrl);
     startTransition(() => {
@@ -65,15 +65,15 @@ export function LoginForm() {
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <FormField
           control={form.control}
-          name="email"
+          name="identificador"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Email</FormLabel>
+              <FormLabel>Email, CI o Teléfono</FormLabel>
               <FormControl>
                 <Input
-                  type="email"
+                  type="text"
                   placeholder="admin@tripleimpacto.bo"
-                  autoComplete="email"
+                  autoComplete="username"
                   disabled={isPending}
                   {...field}
                 />

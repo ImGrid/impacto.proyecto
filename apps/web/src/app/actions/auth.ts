@@ -20,7 +20,7 @@ export async function login(
   _prevState: LoginState,
   formData: FormData,
 ): Promise<LoginState> {
-  const email = formData.get("email") as string;
+  const identificador = formData.get("identificador") as string;
   const password = formData.get("password") as string;
   const callbackUrl = (formData.get("callbackUrl") as string) || "/";
 
@@ -29,7 +29,7 @@ export async function login(
     const response = await fetch(`${API_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identificador, password }),
     });
 
     if (!response.ok) {

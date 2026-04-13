@@ -31,11 +31,13 @@ export class SucursalesController {
   }
 
   @Get()
+  @Roles(rol_usuario.ADMIN, rol_usuario.GENERADOR)
   findAll(@Query() query: SucursalQueryDto) {
     return this.sucursalesService.findAll(query);
   }
 
   @Get(':id')
+  @Roles(rol_usuario.ADMIN, rol_usuario.GENERADOR)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.sucursalesService.findOne(id);
   }

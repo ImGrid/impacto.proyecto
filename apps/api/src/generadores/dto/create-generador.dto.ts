@@ -13,10 +13,10 @@ import {
 } from 'class-validator';
 
 export class CreateGeneradorDto {
+  @IsOptional()
   @IsEmail()
-  @IsNotEmpty()
   @MaxLength(150)
-  email: string;
+  email?: string;
 
   @IsString()
   @IsNotEmpty()

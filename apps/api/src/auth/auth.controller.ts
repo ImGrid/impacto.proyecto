@@ -8,9 +8,8 @@ import {
   Headers,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { LoginDto, RefreshDto } from './dto';
-import { Public } from './decorators';
-import { CurrentUser } from './decorators';
+import { LoginDto, RefreshDto, DeviceTokenDto } from './dto';
+import { Public, CurrentUser } from './decorators';
 import { RefreshTokenGuard } from './guards';
 
 @Controller('auth')
@@ -48,5 +47,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   logoutAll(@CurrentUser('userId') userId: number) {
     return this.authService.logoutAll(userId);
+  }
+
+  @Post('device-token')
+  @HttpCode(HttpStatus.OK)
+  updateDeviceToken(
+    @CurrentUser('userId') userId: number,
+    @Body() dto: DeviceTokenDto,
+  ) {
+    return this.authService.updateDeviceToken(userId, dto.device_token);
   }
 }

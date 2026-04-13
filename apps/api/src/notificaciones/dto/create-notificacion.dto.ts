@@ -28,4 +28,9 @@ export class CreateNotificacionDto {
   @IsInt({ each: true })
   @Type(() => Number)
   receptor_ids?: number[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  sucursal_id?: number;
 }

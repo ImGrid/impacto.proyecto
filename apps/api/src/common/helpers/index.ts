@@ -1,1 +1,1 @@
-export { toBoolean } from './transform.helpers';
+export { toBoolean, normalizarCI } from './transform.helpers';

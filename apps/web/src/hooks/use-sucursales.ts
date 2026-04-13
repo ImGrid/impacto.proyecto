@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { clientGet, clientPost, clientPatch, clientDelete } from "@/lib/client-api";
-import type { Sucursal, FrecuenciaRecojo, PaginatedResponse } from "@/types/api";
+import type { Sucursal, FrecuenciaRecojo, DiaSemana, PaginatedResponse } from "@/types/api";
 
 export const sucursalesKeys = {
   all: ["sucursales"] as const,
@@ -56,6 +56,12 @@ type SucursalMaterialInput = {
   cantidad_aproximada?: string;
 };
 
+type SucursalHorarioInput = {
+  dia_semana: DiaSemana;
+  hora_inicio: string;
+  hora_fin: string;
+};
+
 export function useCreateSucursal() {
   const queryClient = useQueryClient();
 
@@ -70,6 +76,7 @@ export function useCreateSucursal() {
       horario_recojo?: string;
       frecuencia?: FrecuenciaRecojo;
       materiales?: SucursalMaterialInput[];
+      horarios?: SucursalHorarioInput[];
     }) => clientPost("/sucursales", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sucursalesKeys.lists() });
@@ -99,6 +106,7 @@ export function useUpdateSucursal() {
         horario_recojo?: string;
         frecuencia?: FrecuenciaRecojo;
         materiales?: SucursalMaterialInput[];
+        horarios?: SucursalHorarioInput[];
         activo?: boolean;
       };
     }) => clientPatch<Sucursal>(`/sucursales/${id}`, data),

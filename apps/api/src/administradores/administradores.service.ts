@@ -23,6 +23,7 @@ export class AdministradoresService {
     return this.prisma.usuario.create({
       data: {
         email: dto.email,
+        identificador: dto.email,
         password_hash,
         rol: 'ADMIN',
         administrador: {

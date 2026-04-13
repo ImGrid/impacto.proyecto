@@ -14,7 +14,7 @@ export const columns: ColumnDef<Generador>[] = [
   {
     id: "email",
     header: "Email",
-    cell: ({ row }) => row.original.usuario.email,
+    cell: ({ row }) => row.original.usuario.email || "—",
   },
   {
     id: "tipo_generador",

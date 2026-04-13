@@ -6,6 +6,7 @@ import * as Joi from "joi";
 import { PrismaModule } from "./prisma";
 import { AuthModule, JwtAuthGuard, RolesGuard } from "./auth";
 import { AllExceptionsFilter } from "./common/filters";
+import { FcmModule } from "./common/services/fcm.module";
 import { ZonasModule } from "./zonas";
 import { AcopiadoresModule } from "./acopiadores";
 import { GeneradoresModule } from "./generadores";
@@ -18,6 +19,9 @@ import { PreciosMaterialModule } from "./precios-material";
 import { EventosModule } from "./eventos";
 import { NotificacionesModule } from "./notificaciones";
 import { AdministradoresModule } from "./administradores";
+import { TransaccionesModule } from "./transacciones";
+import { PagosModule } from "./pagos";
+import { PerfilModule } from "./perfil";
 
 @Module({
   imports: [
@@ -42,6 +46,9 @@ import { AdministradoresModule } from "./administradores";
     // Base de datos (Prisma) - global
     PrismaModule,
 
+    // Firebase Cloud Messaging - global
+    FcmModule,
+
     // Autenticación (JWT + Passport)
     AuthModule,
 
@@ -62,6 +69,13 @@ import { AdministradoresModule } from "./administradores";
     GeneradoresModule,
     SucursalesModule,
     RecolectoresModule,
+
+    // Módulos - Operaciones
+    TransaccionesModule,
+    PagosModule,
+
+    // Módulo - Perfil propio
+    PerfilModule,
 
     // Rate limiting: 100 requests por minuto por IP
     ThrottlerModule.forRoot([

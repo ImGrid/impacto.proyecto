@@ -10,7 +10,7 @@ import {
   MaxLength,
   ValidateNested,
 } from 'class-validator';
-import { frecuencia_recojo } from '@prisma/client';
+import { dia_semana, frecuencia_recojo } from '@prisma/client';
 
 export class SucursalMaterialDto {
   @IsInt()
@@ -64,4 +64,23 @@ export class CreateSucursalDto {
   @ValidateNested({ each: true })
   @Type(() => SucursalMaterialDto)
   materiales?: SucursalMaterialDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SucursalHorarioDto)
+  horarios?: SucursalHorarioDto[];
+}
+
+export class SucursalHorarioDto {
+  @IsEnum(dia_semana)
+  dia_semana: dia_semana;
+
+  @IsString()
+  @IsNotEmpty()
+  hora_inicio: string;
+
+  @IsString()
+  @IsNotEmpty()
+  hora_fin: string;
 }

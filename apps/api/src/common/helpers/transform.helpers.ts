@@ -1,3 +1,12 @@
+/**
+ * Normaliza una cédula de identidad boliviana:
+ * quita espacios internos.
+ * "9876543 CB" → "9876543CB"
+ */
+export function normalizarCI(ci: string): string {
+  return ci.replace(/\s+/g, '');
+}
+
 export function toBoolean({
   obj,
   key,

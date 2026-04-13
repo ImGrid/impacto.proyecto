@@ -50,8 +50,16 @@ docs/
 # Temporary files
 tmp_token.json
 
+# Firebase (NUNCA subir a repositorios)
+*firebase-adminsdk*
+google-services.json
+firebase-service-account.json
+
 # Graphics source files
 Graficos_Tiple Impacto_Carpeta/
+
+# Mockups/prototipos HTML
+mockup_*.html
 
 # Screenshots/internal images
 images/

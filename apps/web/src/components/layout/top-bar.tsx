@@ -25,6 +25,11 @@ const segmentLabels: Record<string, string> = {
   materiales: "Materiales",
   "tipos-generador": "Tipos de Generador",
   asociaciones: "Asociaciones",
+  transacciones: "Transacciones",
+  pagos: "Pagos",
+  "precios-material": "Precios Materiales",
+  eventos: "Eventos",
+  notificaciones: "Notificaciones",
   crear: "Crear",
 };
 

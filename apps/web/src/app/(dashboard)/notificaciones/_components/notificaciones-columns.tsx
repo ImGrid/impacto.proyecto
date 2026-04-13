@@ -16,7 +16,7 @@ function formatDateTime(dateStr: string) {
 }
 
 function getDestinatarioLabel(notif: Notificacion) {
-  if (notif.receptor) return notif.receptor.email;
+  if (notif.receptor) return notif.receptor.email || notif.receptor.identificador;
   if (notif.zona) return `Zona: ${notif.zona.nombre}`;
   return "Todas las recolectoras";
 }

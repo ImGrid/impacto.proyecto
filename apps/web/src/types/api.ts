@@ -54,7 +54,7 @@ export type Administrador = {
   telefono: string;
   fecha_creacion: string;
   usuario: {
-    email: string;
+    email: string | null;
     activo: boolean;
   };
 };
@@ -72,7 +72,7 @@ export type Generador = {
   activo: boolean;
   fecha_creacion: string;
   usuario: {
-    email: string;
+    email: string | null;
     activo: boolean;
   };
   tipo_generador: {
@@ -102,7 +102,7 @@ export type Acopiador = {
   activo: boolean;
   fecha_creacion: string;
   usuario: {
-    email: string;
+    email: string | null;
     activo: boolean;
   };
   zona: {
@@ -129,6 +129,13 @@ export type SucursalMaterial = {
   };
 };
 
+export type SucursalHorario = {
+  id: number;
+  dia_semana: DiaSemana;
+  hora_inicio: string;
+  hora_fin: string;
+};
+
 export type Sucursal = {
   id: number;
   generador_id: number;
@@ -150,6 +157,7 @@ export type Sucursal = {
     nombre: string;
   };
   sucursal_material: SucursalMaterial[];
+  sucursal_horario: SucursalHorario[];
 };
 
 export type Genero = "HOMBRE" | "MUJER" | "NO_ESPECIFICA";
@@ -204,7 +212,7 @@ export type Recolector = {
   activo: boolean;
   fecha_creacion: string;
   usuario: {
-    email: string;
+    email: string | null;
     activo: boolean;
   };
   acopiador: {
@@ -275,10 +283,99 @@ export type Notificacion = {
   fecha_creacion: string;
   fecha_lectura: string | null;
   zona: { id: number; nombre: string } | null;
-  emisor: { id: number; email: string } | null;
-  receptor: { id: number; email: string } | null;
+  emisor: { id: number; email: string | null; identificador: string } | null;
+  receptor: { id: number; email: string | null; identificador: string } | null;
   evento_id: number | null;
 };
+
+// --- Transacciones ---
+
+export type EstadoTransaccion = "GENERADO" | "RECOLECTADO" | "ENTREGADO" | "PAGADO";
+
+export type DetalleTransaccion = {
+  id: number;
+  transaccion_id: number;
+  material_id: number;
+  cantidad: string;
+  unidad_medida: string;
+  precio_unitario: string;
+  subtotal: string;
+  material: {
+    id: number;
+    nombre: string;
+  };
+};
+
+export type TransaccionHistorial = {
+  id: number;
+  transaccion_id: number;
+  estado: EstadoTransaccion;
+  actor_id: number;
+  rol_actor: string;
+  observaciones: string | null;
+  detalles: Record<string, unknown> | null;
+  fecha: string;
+  usuario: {
+    id: number;
+    identificador: string;
+    rol: string;
+  };
+};
+
+export type Transaccion = {
+  id: number;
+  fecha: string;
+  hora: string;
+  recolector_id: number | null;
+  acopiador_id: number | null;
+  sucursal_id: number | null;
+  zona_id: number;
+  monto_total: string;
+  observaciones: string | null;
+  fecha_creacion: string;
+  estado: EstadoTransaccion;
+  creado_por_id: number | null;
+  recolector: { id: number; nombre_completo: string } | null;
+  acopiador: { id: number; nombre_completo: string; nombre_punto: string } | null;
+  zona: { id: number; nombre: string };
+  detalle_transaccion: DetalleTransaccion[];
+};
+
+export type TransaccionDetalle = Transaccion & {
+  sucursal: {
+    id: number;
+    nombre: string;
+    generador: { id: number; razon_social: string };
+  } | null;
+  transaccion_historial: TransaccionHistorial[];
+};
+
+// --- Pagos ---
+
+export type PagoTransaccion = {
+  transaccion_id: number;
+  transaccion?: {
+    id: number;
+    fecha: string;
+    monto_total: string;
+    detalle_transaccion: DetalleTransaccion[];
+  };
+};
+
+export type Pago = {
+  id: number;
+  recolector_id: number;
+  acopiador_id: number;
+  monto_total: string;
+  fecha_pago: string;
+  observaciones: string | null;
+  fecha_creacion: string;
+  recolector: { id: number; nombre_completo: string };
+  acopiador: { id: number; nombre_completo: string };
+  pago_transaccion: PagoTransaccion[];
+};
+
+// --- Paginación ---
 
 export type PaginatedMeta = {
   total: number;

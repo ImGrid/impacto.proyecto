@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
+import { normalizarCI } from '../common/helpers';
 import {
   CreateRecolectorDto,
   UpdateRecolectorDto,
@@ -31,18 +32,20 @@ export class RecolectoresService {
 
   async create(dto: CreateRecolectorDto) {
     const password_hash = await argon2.hash(dto.password);
+    const ciNormalizado = normalizarCI(dto.cedula_identidad);
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Create usuario + recolector (nested write)
       const usuario = await tx.usuario.create({
         data: {
-          email: dto.email,
+          email: dto.email || null,
+          identificador: ciNormalizado,
           password_hash,
           rol: 'RECOLECTOR',
           recolector: {
             create: {
               nombre_completo: dto.nombre_completo,
-              cedula_identidad: dto.cedula_identidad,
+              cedula_identidad: ciNormalizado,
               celular: dto.celular,
               direccion_domicilio: dto.direccion_domicilio,
               latitud: dto.latitud,
@@ -56,12 +59,7 @@ export class RecolectoresService {
             },
           },
         },
-        select: {
-          id: true,
-          email: true,
-          rol: true,
-          activo: true,
-          fecha_creacion: true,
+        include: {
           recolector: true,
         },
       });

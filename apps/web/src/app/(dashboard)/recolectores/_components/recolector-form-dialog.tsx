@@ -105,10 +105,10 @@ const baseSchema = z.object({
 });
 
 const createSchema = baseSchema
-  .refine((data) => !!data.email && data.email.includes("@"), {
-    message: "Ingrese un email válido",
-    path: ["email"],
-  })
+  .refine(
+    (data) => !data.email || data.email.includes("@"),
+    { message: "Ingrese un email válido", path: ["email"] },
+  )
   .refine((data) => !!data.password && data.password.length >= 8, {
     message: "Mínimo 8 caracteres",
     path: ["password"],

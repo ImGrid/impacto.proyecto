@@ -20,9 +20,11 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto, dispositivo?: string) {
-    // 1. Buscar usuario por email
+    // 1. Buscar usuario por identificador (email, CI o teléfono según rol)
+    // Normalizar: quitar espacios (CI boliviano puede venir con espacio: "9876543 CB")
+    const identificadorNormalizado = dto.identificador.replace(/\s+/g, '');
     const usuario = await this.prisma.usuario.findUnique({
-      where: { email: dto.email },
+      where: { identificador: identificadorNormalizado },
     });
 
     if (!usuario) {
@@ -47,7 +49,7 @@ export class AuthService {
     // 4. Generar tokens y guardar refresh en BD
     const tokens = await this.generateTokens(
       usuario.id,
-      usuario.email,
+      usuario.identificador,
       usuario.rol,
     );
     await this.saveRefreshToken(usuario.id, tokens.refresh_token, dispositivo);
@@ -90,7 +92,7 @@ export class AuthService {
 
     const tokens = await this.generateTokens(
       usuario.id,
-      usuario.email,
+      usuario.identificador,
       usuario.rol,
     );
     await this.saveRefreshToken(
@@ -118,10 +120,17 @@ export class AuthService {
     });
   }
 
+  async updateDeviceToken(userId: number, deviceToken: string) {
+    await this.prisma.usuario.update({
+      where: { id: userId },
+      data: { device_token: deviceToken },
+    });
+  }
+
   // --- Helpers privados ---
 
-  private async generateTokens(userId: number, email: string, rol: string) {
-    const payload: JwtPayload = { sub: userId, email, rol };
+  private async generateTokens(userId: number, identificador: string, rol: string) {
+    const payload: JwtPayload = { sub: userId, identificador, rol };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload),

@@ -27,7 +27,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 
-export function AppSidebar({ userEmail }: { userEmail: string }) {
+export function AppSidebar({ userIdentificador }: { userIdentificador: string }) {
   const pathname = usePathname();
 
   return (
@@ -143,9 +143,9 @@ export function AppSidebar({ userEmail }: { userEmail: string }) {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton tooltip={userEmail} asChild>
+            <SidebarMenuButton tooltip={userIdentificador} asChild>
               <span className="text-xs text-muted-foreground truncate">
-                {userEmail}
+                {userIdentificador}
               </span>
             </SidebarMenuButton>
           </SidebarMenuItem>

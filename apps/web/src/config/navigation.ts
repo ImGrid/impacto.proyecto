@@ -14,6 +14,9 @@ import {
   Bell,
   UsersRound,
   BookOpen,
+  ClipboardList,
+  ArrowLeftRight,
+  Banknote,
   type LucideIcon,
 } from "lucide-react";
 
@@ -50,6 +53,14 @@ export const sidebarNavigation: NavSection[] = [
       { title: "Tipos de Generador", href: "/tipos-generador", icon: Tags },
       { title: "Asociaciones", href: "/asociaciones", icon: Users },
       { title: "Precios Materiales", href: "/precios-material", icon: BadgeDollarSign },
+    ],
+  },
+  {
+    title: "Operaciones",
+    icon: ClipboardList,
+    items: [
+      { title: "Transacciones", href: "/transacciones", icon: ArrowLeftRight },
+      { title: "Pagos", href: "/pagos", icon: Banknote },
     ],
   },
   {

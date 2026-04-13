@@ -7,7 +7,7 @@ import { decodeJwt } from "jose";
 
 export type SessionUser = {
   userId: number;
-  email: string;
+  identificador: string;
   rol: string;
 };
 
@@ -30,7 +30,7 @@ export const verifySession = cache(async (): Promise<SessionUser> => {
 
     return {
       userId: Number(payload.sub),
-      email: String(payload.email),
+      identificador: String(payload.identificador),
       rol: String(payload.rol),
     };
   } catch {

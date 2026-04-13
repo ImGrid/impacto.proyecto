@@ -38,10 +38,10 @@ export class RecolectorMaterialDto {
 }
 
 export class CreateRecolectorDto {
+  @IsOptional()
   @IsEmail()
-  @IsNotEmpty()
   @MaxLength(150)
-  email: string;
+  email?: string;
 
   @IsString()
   @IsNotEmpty()

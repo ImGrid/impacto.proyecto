@@ -31,16 +31,19 @@ export class RecolectoresController {
   }
 
   @Get()
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR)
   findAll(@Query() query: RecolectorQueryDto) {
     return this.recolectoresService.findAll(query);
   }
 
   @Get('mapa')
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR)
   findAllForMap() {
     return this.recolectoresService.findAllForMap();
   }
 
   @Get(':id')
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.recolectoresService.findOne(id);
   }

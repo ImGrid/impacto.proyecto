@@ -40,7 +40,7 @@ export const columns: ColumnDef<Recolector>[] = [
   {
     id: "email",
     header: "Email",
-    cell: ({ row }) => row.original.usuario.email,
+    cell: ({ row }) => row.original.usuario.email || "—",
   },
   {
     id: "acopiador",

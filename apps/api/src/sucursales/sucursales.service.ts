@@ -6,7 +6,22 @@ import {
   CreateSucursalDto,
   UpdateSucursalDto,
   SucursalQueryDto,
+  SucursalHorarioDto,
 } from './dto';
+
+// Convierte string "08:00" a Date con fecha base 1970-01-01 (Prisma Time)
+function timeStringToDate(time: string): Date {
+  return new Date(`1970-01-01T${time}:00.000Z`);
+}
+
+function mapHorarios(sucursalId: number, horarios: SucursalHorarioDto[]) {
+  return horarios.map((h) => ({
+    sucursal_id: sucursalId,
+    dia_semana: h.dia_semana,
+    hora_inicio: timeStringToDate(h.hora_inicio),
+    hora_fin: timeStringToDate(h.hora_fin),
+  }));
+}
 
 const sucursalInclude = {
   generador: {
@@ -18,6 +33,10 @@ const sucursalInclude = {
   sucursal_material: {
     include: { material: { select: { id: true, nombre: true } } },
   },
+  sucursal_horario: {
+    select: { id: true, dia_semana: true, hora_inicio: true, hora_fin: true },
+    orderBy: { id: 'asc' as const },
+  },
 } satisfies Prisma.sucursalInclude;
 
 @Injectable()
@@ -25,7 +44,7 @@ export class SucursalesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateSucursalDto) {
-    const { materiales, ...sucursalData } = dto;
+    const { materiales, horarios, ...sucursalData } = dto;
 
     return this.prisma.$transaction(async (tx) => {
       const sucursal = await tx.sucursal.create({
@@ -39,6 +58,12 @@ export class SucursalesService {
             material_id: m.material_id,
             cantidad_aproximada: m.cantidad_aproximada,
           })),
+        });
+      }
+
+      if (horarios?.length) {
+        await tx.sucursal_horario.createMany({
+          data: mapHorarios(sucursal.id, horarios),
         });
       }
 
@@ -87,7 +112,7 @@ export class SucursalesService {
   async update(id: number, dto: UpdateSucursalDto) {
     await this.findOne(id);
 
-    const { materiales, ...sucursalData } = dto;
+    const { materiales, horarios, ...sucursalData } = dto;
 
     return this.prisma.$transaction(async (tx) => {
       if (Object.keys(sucursalData).length > 0) {
@@ -108,6 +133,17 @@ export class SucursalesService {
               material_id: m.material_id,
               cantidad_aproximada: m.cantidad_aproximada,
             })),
+          });
+        }
+      }
+
+      if (horarios !== undefined) {
+        await tx.sucursal_horario.deleteMany({
+          where: { sucursal_id: id },
+        });
+        if (horarios.length > 0) {
+          await tx.sucursal_horario.createMany({
+            data: mapHorarios(id, horarios),
           });
         }
       }

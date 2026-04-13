@@ -14,7 +14,8 @@ export class GeneradoresService {
 
     return this.prisma.usuario.create({
       data: {
-        email: dto.email,
+        email: dto.email || null,
+        identificador: dto.contacto_telefono,
         password_hash,
         rol: 'GENERADOR',
         generador: {

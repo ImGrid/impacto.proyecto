@@ -27,16 +27,19 @@ export class ZonasController {
   }
 
   @Get()
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
   findAll(@Query() query: ZonaQueryDto) {
     return this.zonasService.findAll(query);
   }
 
   @Get('mapa')
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
   findAllForMap() {
     return this.zonasService.findAllForMap();
   }
 
   @Get(':id')
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.zonasService.findOne(id);
   }

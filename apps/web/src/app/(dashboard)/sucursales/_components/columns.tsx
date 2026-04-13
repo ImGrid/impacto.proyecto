@@ -5,13 +5,21 @@ import { Badge } from "@/components/ui/badge";
 import type { Sucursal } from "@/types/api";
 import { SucursalesTableActions } from "./sucursales-table-actions";
 
-const frecuenciaLabels: Record<string, string> = {
-  DIARIO: "Diario",
-  SEMANAL: "Semanal",
-  QUINCENAL: "Quincenal",
-  MENSUAL: "Mensual",
-  BAJO_DEMANDA: "Bajo demanda",
+const diaLabels: Record<string, string> = {
+  LUNES: "Lun",
+  MARTES: "Mar",
+  MIERCOLES: "Mié",
+  JUEVES: "Jue",
+  VIERNES: "Vie",
+  SABADO: "Sáb",
+  DOMINGO: "Dom",
 };
+
+function formatTime(isoTime: string): string {
+  // El backend retorna "1970-01-01T08:00:00.000Z", extraemos HH:mm
+  const date = new Date(isoTime);
+  return date.toISOString().substring(11, 16);
+}
 
 export const columns: ColumnDef<Sucursal>[] = [
   {
@@ -29,15 +37,21 @@ export const columns: ColumnDef<Sucursal>[] = [
     cell: ({ row }) => row.original.zona.nombre,
   },
   {
-    id: "frecuencia",
-    header: "Frecuencia",
+    id: "horarios",
+    header: "Horarios",
     cell: ({ row }) => {
-      const frecuencia = row.original.frecuencia;
-      if (!frecuencia) return <span className="text-muted-foreground">—</span>;
+      const horarios = row.original.sucursal_horario;
+      if (!horarios || horarios.length === 0) {
+        return <span className="text-muted-foreground">—</span>;
+      }
       return (
-        <Badge variant="outline">
-          {frecuenciaLabels[frecuencia] ?? frecuencia}
-        </Badge>
+        <div className="flex flex-wrap gap-1">
+          {horarios.map((h) => (
+            <Badge key={h.id} variant="outline" className="text-xs">
+              {diaLabels[h.dia_semana]} {formatTime(h.hora_inicio)}-{formatTime(h.hora_fin)}
+            </Badge>
+          ))}
+        </div>
       );
     },
   },

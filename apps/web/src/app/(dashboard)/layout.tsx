@@ -13,7 +13,7 @@ export default async function DashboardLayout({
 
   return (
     <SidebarProvider>
-      <AppSidebar userEmail={session.email} />
+      <AppSidebar userIdentificador={session.identificador} />
       <SidebarInset>
         <TopBar />
         <div className="flex-1 p-6">{children}</div>

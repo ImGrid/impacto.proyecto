@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
+import { normalizarCI } from '../common/helpers';
 import { CreateAcopiadorDto, UpdateAcopiadorDto, AcopiadorQueryDto } from './dto';
 
 @Injectable()
@@ -15,12 +16,13 @@ export class AcopiadoresService {
     return this.prisma.usuario.create({
       data: {
         email: dto.email,
+        identificador: dto.email,
         password_hash,
         rol: 'ACOPIADOR',
         acopiador: {
           create: {
             nombre_completo: dto.nombre_completo,
-            cedula_identidad: dto.cedula_identidad,
+            cedula_identidad: normalizarCI(dto.cedula_identidad),
             celular: dto.celular,
             tipo_acopio: dto.tipo_acopio,
             nombre_punto: dto.nombre_punto,
