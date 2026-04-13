@@ -28,6 +28,11 @@ export const verifySession = cache(async (): Promise<SessionUser> => {
     // 3. NestJS verifica la firma cuando hacemos requests a la API
     const payload = decodeJwt(accessToken);
 
+    // Defensa en profundidad: solo ADMIN puede usar el panel web
+    if (payload.rol !== "ADMIN") {
+      redirect("/login");
+    }
+
     return {
       userId: Number(payload.sub),
       identificador: String(payload.identificador),

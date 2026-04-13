@@ -339,9 +339,12 @@ export class TransaccionesService {
 
     // Filtros opcionales del query
     if (query.estado) where.estado = query.estado;
-    if (query.recolector_id) where.recolector_id = query.recolector_id;
-    if (query.acopiador_id) where.acopiador_id = query.acopiador_id;
     if (query.zona_id) where.zona_id = query.zona_id;
+    // Solo ADMIN puede filtrar por recolector/acopiador arbitrarios
+    if (userRol === 'ADMIN') {
+      if (query.recolector_id) where.recolector_id = query.recolector_id;
+      if (query.acopiador_id) where.acopiador_id = query.acopiador_id;
+    }
 
     if (query.fecha_desde || query.fecha_hasta) {
       where.fecha = {};
@@ -429,6 +432,39 @@ export class TransaccionesService {
       orderBy: { fecha_creacion: 'desc' },
       include: {
         recolector: { select: { id: true, nombre_completo: true, cedula_identidad: true } },
+        zona: { select: { id: true, nombre: true } },
+        detalle_transaccion: {
+          include: { material: { select: { id: true, nombre: true } } },
+        },
+      },
+    });
+  }
+
+  /**
+   * Transacciones disponibles para recoger (estado GENERADO en la zona del recolector).
+   * Son transacciones creadas por generadores que aún no fueron recogidas.
+   */
+  async findDisponibles(userId: number) {
+    const recolector = await this.prisma.recolector.findFirst({
+      where: { usuario_id: userId },
+    });
+    if (!recolector) throw new ForbiddenException('Recolector no encontrado');
+
+    return this.prisma.transaccion.findMany({
+      where: {
+        estado: 'GENERADO',
+        recolector_id: null,
+        zona_id: recolector.zona_id,
+      },
+      orderBy: { fecha_creacion: 'desc' },
+      include: {
+        sucursal: {
+          select: {
+            id: true,
+            nombre: true,
+            generador: { select: { id: true, razon_social: true } },
+          },
+        },
         zona: { select: { id: true, nombre: true } },
         detalle_transaccion: {
           include: { material: { select: { id: true, nombre: true } } },

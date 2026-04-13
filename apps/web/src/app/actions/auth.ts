@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { decodeJwt } from "jose";
 
 const API_URL = process.env.API_URL!;
 
@@ -39,6 +40,16 @@ export async function login(
     }
 
     const data = await response.json();
+
+    // Verificar que el usuario sea ADMIN — solo administradores acceden al panel web
+    try {
+      const payload = decodeJwt(data.access_token);
+      if (payload.rol !== "ADMIN") {
+        return { error: "Acceso denegado. Este panel es solo para administradores." };
+      }
+    } catch {
+      return { error: "Error al verificar credenciales." };
+    }
 
     // Guardar tokens en cookies httpOnly
     const cookieStore = await cookies();

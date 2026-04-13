@@ -163,9 +163,11 @@ export class PagosService {
       where.recolector_id = recolector.id;
     }
 
-    // Filtros opcionales
-    if (query.recolector_id) where.recolector_id = query.recolector_id;
-    if (query.acopiador_id) where.acopiador_id = query.acopiador_id;
+    // Filtros opcionales (solo ADMIN puede filtrar por recolector/acopiador arbitrarios)
+    if (userRol === 'ADMIN') {
+      if (query.recolector_id) where.recolector_id = query.recolector_id;
+      if (query.acopiador_id) where.acopiador_id = query.acopiador_id;
+    }
 
     if (query.fecha_desde || query.fecha_hasta) {
       where.fecha_pago = {};

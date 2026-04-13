@@ -85,6 +85,23 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // Verificar que el rol sea ADMIN — solo administradores usan el panel web
+  if (accessToken && !isPublicPath(pathname)) {
+    try {
+      const payload = decodeJwt(accessToken);
+      if (payload.rol !== "ADMIN") {
+        // Limpiar cookies y redirigir al login
+        const loginUrl = new URL("/login", request.url);
+        const response = NextResponse.redirect(loginUrl);
+        response.cookies.delete("access_token");
+        response.cookies.delete("refresh_token");
+        return response;
+      }
+    } catch {
+      // Token inválido, se manejará más abajo
+    }
+  }
+
   // Con cookie en /login → dashboard
   if (accessToken && pathname.startsWith("/login")) {
     return NextResponse.redirect(new URL("/", request.url));

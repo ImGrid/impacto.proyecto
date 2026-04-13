@@ -24,6 +24,7 @@ function mapNotificacion(n: any) {
     emisor: n.usuario_notificacion_emisor_idTousuario,
     receptor: n.usuario_notificacion_receptor_idTousuario,
     evento_id: n.evento_id,
+    evento: n.evento ?? null,
   };
 }
 
@@ -34,6 +35,19 @@ const notificacionInclude = {
   },
   usuario_notificacion_receptor_idTousuario: {
     select: { id: true, identificador: true, email: true },
+  },
+  evento: {
+    select: {
+      id: true,
+      titulo: true,
+      descripcion: true,
+      direccion: true,
+      latitud: true,
+      longitud: true,
+      fecha_evento: true,
+      hora_inicio: true,
+      hora_fin: true,
+    },
   },
 };
 
@@ -59,8 +73,11 @@ export class NotificacionesService {
       return this.createFromRecolector(dto, userId);
     }
 
-    // ADMIN: lógica original
-    return this.createFromAdmin(dto, userId);
+    if (userRol === 'ADMIN') {
+      return this.createFromAdmin(dto, userId);
+    }
+
+    throw new ForbiddenException('Rol no permitido para crear notificaciones');
   }
 
   private async createFromGenerador(dto: CreateNotificacionDto, userId: number) {

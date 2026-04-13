@@ -52,6 +52,12 @@ export class TransaccionesController {
     return this.transaccionesService.findPendientes(userId);
   }
 
+  @Get('disponibles')
+  @Roles(rol_usuario.RECOLECTOR)
+  findDisponibles(@CurrentUser('userId') userId: number) {
+    return this.transaccionesService.findDisponibles(userId);
+  }
+
   @Get(':id')
   findOne(
     @Param('id', ParseIntPipe) id: number,
