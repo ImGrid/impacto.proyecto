@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
@@ -158,5 +162,37 @@ export class SucursalesService {
   async hardDelete(id: number) {
     await this.findOne(id);
     await this.prisma.sucursal.delete({ where: { id } });
+  }
+
+  /**
+   * Actualizar horarios de una sucursal.
+   * El generador solo puede modificar horarios de sus propias sucursales.
+   */
+  async updateHorarios(id: number, horarios: SucursalHorarioDto[], userId: number) {
+    const sucursal = await this.prisma.sucursal.findUnique({
+      where: { id },
+      include: { generador: { select: { usuario_id: true } } },
+    });
+
+    if (!sucursal) throw new NotFoundException('Sucursal no encontrada');
+
+    if (sucursal.generador.usuario_id !== userId) {
+      throw new ForbiddenException('Esta sucursal no pertenece a su empresa');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.sucursal_horario.deleteMany({ where: { sucursal_id: id } });
+
+      if (horarios.length > 0) {
+        await tx.sucursal_horario.createMany({
+          data: mapHorarios(id, horarios),
+        });
+      }
+
+      return tx.sucursal.findUniqueOrThrow({
+        where: { id },
+        include: sucursalInclude,
+      });
+    });
   }
 }

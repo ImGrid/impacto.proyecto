@@ -84,3 +84,10 @@ export class SucursalHorarioDto {
   @IsNotEmpty()
   hora_fin: string;
 }
+
+export class UpdateHorariosDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SucursalHorarioDto)
+  horarios: SucursalHorarioDto[];
+}

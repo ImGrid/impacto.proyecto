@@ -1,12 +1,19 @@
 "use client";
 
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { clientGet } from "@/lib/client-api";
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
+import { toast } from "sonner";
+import { clientGet, clientPost } from "@/lib/client-api";
 import type {
   Transaccion,
   TransaccionDetalle,
   PaginatedResponse,
   EstadoTransaccion,
+  CreateTransaccionInput,
 } from "@/types/api";
 
 export const transaccionesKeys = {
@@ -56,5 +63,21 @@ export function useTransaccionDetalle(id: number | null) {
     queryKey: transaccionesKeys.detail(id ?? 0),
     queryFn: () => clientGet<TransaccionDetalle>(`/transacciones/${id}`),
     enabled: !!id,
+  });
+}
+
+export function useCreateTransaccion() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CreateTransaccionInput) =>
+      clientPost<TransaccionDetalle>("/transacciones", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: transaccionesKeys.lists() });
+      toast.success("Transacción creada exitosamente");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
   });
 }

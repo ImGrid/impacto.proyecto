@@ -12,12 +12,13 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
-import { Roles } from '../auth/decorators';
+import { Roles, CurrentUser } from '../auth/decorators';
 import { SucursalesService } from './sucursales.service';
 import {
   CreateSucursalDto,
   UpdateSucursalDto,
   SucursalQueryDto,
+  UpdateHorariosDto,
 } from './dto';
 
 @Controller('sucursales')
@@ -40,6 +41,16 @@ export class SucursalesController {
   @Roles(rol_usuario.ADMIN, rol_usuario.GENERADOR)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.sucursalesService.findOne(id);
+  }
+
+  @Patch(':id/horarios')
+  @Roles(rol_usuario.GENERADOR, rol_usuario.ADMIN)
+  updateHorarios(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateHorariosDto,
+    @CurrentUser('userId') userId: number,
+  ) {
+    return this.sucursalesService.updateHorarios(id, dto.horarios, userId);
   }
 
   @Patch(':id')

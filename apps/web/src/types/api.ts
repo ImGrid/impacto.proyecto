@@ -350,6 +350,25 @@ export type TransaccionDetalle = Transaccion & {
   transaccion_historial: TransaccionHistorial[];
 };
 
+export type CreateTransaccionDetalle = {
+  material_id: number;
+  cantidad: number;
+  unidad_medida: UnidadMedida;
+  precio_unitario?: number;
+};
+
+export type CreateTransaccionInput = {
+  estado?: EstadoTransaccion;
+  recolector_id?: number;
+  acopiador_id?: number;
+  sucursal_id?: number;
+  zona_id?: number;
+  fecha?: string;
+  hora?: string;
+  observaciones?: string;
+  detalles: CreateTransaccionDetalle[];
+};
+
 // --- Pagos ---
 
 export type PagoTransaccion = {

@@ -28,7 +28,12 @@ export class TransaccionesController {
   constructor(private readonly transaccionesService: TransaccionesService) {}
 
   @Post()
-  @Roles(rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
+  @Roles(
+    rol_usuario.ADMIN,
+    rol_usuario.ACOPIADOR,
+    rol_usuario.RECOLECTOR,
+    rol_usuario.GENERADOR,
+  )
   create(
     @Body() dto: CreateTransaccionDto,
     @CurrentUser('userId') userId: number,
@@ -68,7 +73,7 @@ export class TransaccionesController {
   }
 
   @Patch(':id')
-  @Roles(rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR)
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR)
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTransaccionDto,

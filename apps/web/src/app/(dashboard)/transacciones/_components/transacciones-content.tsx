@@ -1,12 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Search, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useTransacciones } from "@/hooks/use-transacciones";
 import { useZonas } from "@/hooks/use-zonas";
 import type { EstadoTransaccion, Transaccion } from "@/types/api";
 import { DataTable } from "@/components/shared/data-table";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -17,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { columns } from "./columns";
 import { TransaccionDetailDialog } from "./transaccion-detail-dialog";
+import { TransaccionFormDialog } from "./transaccion-form-dialog";
 
 const estadoOptions = [
   { value: "GENERADO", label: "Generado" },
@@ -32,6 +32,7 @@ export function TransaccionesContent() {
   const [zonaId, setZonaId] = useState<number | undefined>(undefined);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const { data, isLoading } = useTransacciones({
     page,
@@ -74,6 +75,11 @@ export function TransaccionesContent() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={() => setCreateOpen(true)}>
+          <Plus className="mr-1 h-4 w-4" />
+          Crear transacción
+        </Button>
+
         <Select
           value={estado ?? "all"}
           onValueChange={(value) => {
@@ -139,6 +145,11 @@ export function TransaccionesContent() {
         transaccionId={selectedId}
         open={detailOpen}
         onOpenChange={setDetailOpen}
+      />
+
+      <TransaccionFormDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
       />
     </div>
   );

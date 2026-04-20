@@ -122,6 +122,93 @@ export class TransaccionesService {
         acopiadorId = acopiador.id;
         zonaId = dto.zona_id ?? acopiador.zona_id;
 
+      } else if (userRol === 'ADMIN') {
+        // El admin registra transacciones manualmente en cualquier estado del flujo
+        // excepto PAGADO (ese corresponde al flujo de pago del acopiador).
+        if (!dto.estado) {
+          throw new BadRequestException(
+            'El administrador debe indicar el estado de la transacción',
+          );
+        }
+        if (dto.estado === 'PAGADO') {
+          throw new BadRequestException(
+            'El estado PAGADO es exclusivo del flujo de pago del acopiador',
+          );
+        }
+        estado = dto.estado;
+
+        if (estado === 'GENERADO') {
+          // Solo requiere sucursal; recolector_id y acopiador_id quedan null.
+          if (!dto.sucursal_id) {
+            throw new BadRequestException(
+              'La sucursal es obligatoria para el estado GENERADO',
+            );
+          }
+          const sucursal = await tx.sucursal.findUnique({
+            where: { id: dto.sucursal_id },
+          });
+          if (!sucursal) throw new BadRequestException('Sucursal no encontrada');
+          zonaId = dto.zona_id ?? sucursal.zona_id;
+
+        } else if (estado === 'RECOLECTADO') {
+          if (!dto.recolector_id) {
+            throw new BadRequestException(
+              'El recolector es obligatorio para el estado RECOLECTADO',
+            );
+          }
+          const recolector = await tx.recolector.findUnique({
+            where: { id: dto.recolector_id },
+          });
+          if (!recolector) throw new BadRequestException('Recolector no encontrado');
+          recolectorId = recolector.id;
+
+          // El admin puede indicar acopiador explícitamente o dejar que se herede
+          // del que tenga asignado el recolector.
+          if (dto.acopiador_id) {
+            const acopiador = await tx.acopiador.findUnique({
+              where: { id: dto.acopiador_id },
+            });
+            if (!acopiador) throw new BadRequestException('Acopiador no encontrado');
+            acopiadorId = acopiador.id;
+          } else {
+            acopiadorId = recolector.acopiador_id;
+          }
+
+          zonaId = dto.zona_id ?? recolector.zona_id;
+
+        } else {
+          // ENTREGADO: recolector y acopiador son obligatorios.
+          if (!dto.recolector_id) {
+            throw new BadRequestException(
+              'El recolector es obligatorio para el estado ENTREGADO',
+            );
+          }
+          if (!dto.acopiador_id) {
+            throw new BadRequestException(
+              'El acopiador es obligatorio para el estado ENTREGADO',
+            );
+          }
+          const recolector = await tx.recolector.findUnique({
+            where: { id: dto.recolector_id },
+          });
+          if (!recolector) throw new BadRequestException('Recolector no encontrado');
+          const acopiador = await tx.acopiador.findUnique({
+            where: { id: dto.acopiador_id },
+          });
+          if (!acopiador) throw new BadRequestException('Acopiador no encontrado');
+
+          recolectorId = recolector.id;
+          acopiadorId = acopiador.id;
+          zonaId = dto.zona_id ?? recolector.zona_id;
+        }
+
+        // Si el admin indicó zona_id explícitamente, validar que existe.
+        if (dto.zona_id && dto.zona_id !== zonaId) {
+          const zona = await tx.zona.findUnique({ where: { id: dto.zona_id } });
+          if (!zona) throw new BadRequestException('Zona no encontrada');
+          zonaId = dto.zona_id;
+        }
+
       } else {
         throw new ForbiddenException('Rol no permitido para crear transacciones');
       }
@@ -138,12 +225,33 @@ export class TransaccionesService {
       const montoTotal = detallesConSubtotal.reduce((sum, d) => sum + d.subtotal, 0);
 
       const now = new Date();
+      let fecha: Date = now;
+      let hora: Date = now;
+
+      // Backdating: solo ADMIN puede registrar fecha/hora distintas a "ahora".
+      if (userRol === 'ADMIN') {
+        if (dto.fecha) {
+          const fechaParsed = new Date(dto.fecha);
+          if (fechaParsed > now) {
+            throw new BadRequestException('La fecha no puede ser futura');
+          }
+          fecha = fechaParsed;
+        }
+        if (dto.hora) {
+          const match = dto.hora.match(/^(\d{1,2}):(\d{2})$/);
+          if (!match) {
+            throw new BadRequestException('La hora debe tener formato HH:mm');
+          }
+          const [, hh, mm] = match;
+          hora = new Date(1970, 0, 1, Number(hh), Number(mm), 0);
+        }
+      }
 
       // Crear transacción + detalles + historial en una sola operación
       const transaccion = await tx.transaccion.create({
         data: {
-          fecha: now,
-          hora: now,
+          fecha,
+          hora,
           recolector_id: recolectorId,
           acopiador_id: acopiadorId,
           sucursal_id: dto.sucursal_id,
@@ -203,12 +311,32 @@ export class TransaccionesService {
       );
     }
 
-    // Validar permisos por rol
-    if (dto.estado === 'RECOLECTADO' && userRol !== 'RECOLECTOR') {
-      throw new ForbiddenException('Solo un recolector puede marcar como RECOLECTADO');
+    // El admin puede mover entre GENERADO → RECOLECTADO → ENTREGADO pero nunca
+    // marcar como PAGADO (ese estado corresponde al flujo de pago del acopiador).
+    if (userRol === 'ADMIN' && dto.estado === 'PAGADO') {
+      throw new ForbiddenException(
+        'El administrador no puede marcar como PAGADO; eso lo hace el flujo de pago del acopiador',
+      );
     }
-    if (dto.estado === 'ENTREGADO' && userRol !== 'ACOPIADOR') {
-      throw new ForbiddenException('Solo un acopiador puede marcar como ENTREGADO');
+
+    // Validar permisos por rol (admin queda autorizado para RECOLECTADO y ENTREGADO).
+    if (
+      dto.estado === 'RECOLECTADO' &&
+      userRol !== 'RECOLECTOR' &&
+      userRol !== 'ADMIN'
+    ) {
+      throw new ForbiddenException(
+        'Solo un recolector o un administrador puede marcar como RECOLECTADO',
+      );
+    }
+    if (
+      dto.estado === 'ENTREGADO' &&
+      userRol !== 'ACOPIADOR' &&
+      userRol !== 'ADMIN'
+    ) {
+      throw new ForbiddenException(
+        'Solo un acopiador o un administrador puede marcar como ENTREGADO',
+      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -217,25 +345,45 @@ export class TransaccionesService {
         observaciones: dto.observaciones ?? transaccion.observaciones,
       };
 
-      // Si es recolector tomando una transacción GENERADO
+      // Si es recolector tomando una transacción GENERADO, se auto-asigna.
+      // El admin, en cambio, solo corrige el estado y respeta la asignación actual.
       if (dto.estado === 'RECOLECTADO') {
-        const recolector = await tx.recolector.findFirst({
-          where: { usuario_id: userId },
-        });
-        if (!recolector) throw new ForbiddenException('Recolector no encontrado');
+        if (userRol === 'RECOLECTOR') {
+          const recolector = await tx.recolector.findFirst({
+            where: { usuario_id: userId },
+          });
+          if (!recolector) throw new ForbiddenException('Recolector no encontrado');
 
-        updateData.recolector = { connect: { id: recolector.id } };
-        updateData.acopiador = { connect: { id: recolector.acopiador_id } };
+          updateData.recolector = { connect: { id: recolector.id } };
+          updateData.acopiador = { connect: { id: recolector.acopiador_id } };
+        } else if (userRol === 'ADMIN') {
+          // Para avanzar a RECOLECTADO la transacción ya debe tener recolector asignado.
+          if (!transaccion.recolector_id) {
+            throw new BadRequestException(
+              'La transacción no tiene recolector asignado. Cree una transacción nueva en estado RECOLECTADO con el recolector correcto.',
+            );
+          }
+        }
       }
 
-      // Si es acopiador completando la transacción
+      // Si es acopiador completando la transacción, se auto-asigna.
+      // El admin respeta la asignación actual.
       if (dto.estado === 'ENTREGADO') {
-        const acopiador = await tx.acopiador.findFirst({
-          where: { usuario_id: userId },
-        });
-        if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
+        if (userRol === 'ACOPIADOR') {
+          const acopiador = await tx.acopiador.findFirst({
+            where: { usuario_id: userId },
+          });
+          if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
 
-        updateData.acopiador = { connect: { id: acopiador.id } };
+          updateData.acopiador = { connect: { id: acopiador.id } };
+        } else if (userRol === 'ADMIN') {
+          // Para avanzar a ENTREGADO la transacción ya debe tener recolector y acopiador.
+          if (!transaccion.recolector_id || !transaccion.acopiador_id) {
+            throw new BadRequestException(
+              'La transacción debe tener recolector y acopiador asignados. Cree una transacción nueva en estado ENTREGADO con los datos correctos.',
+            );
+          }
+        }
       }
 
       // Si vienen detalles nuevos, reemplazar los existentes
