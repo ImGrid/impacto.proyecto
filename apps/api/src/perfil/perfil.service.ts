@@ -1,5 +1,6 @@
 import {
   Injectable,
+  BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
@@ -81,17 +82,82 @@ export class PerfilService {
     });
     if (!recolector) throw new ForbiddenException('Perfil de recolector no encontrado');
 
-    const data: Record<string, unknown> = {};
-    if (dto.celular !== undefined) data.celular = dto.celular;
-    if (dto.direccion_domicilio !== undefined) data.direccion_domicilio = dto.direccion_domicilio;
-    if (dto.latitud !== undefined) data.latitud = dto.latitud;
-    if (dto.longitud !== undefined) data.longitud = dto.longitud;
+    // Validar que todos los materiales enviados existen y están activos.
+    // Esto evita FK rota al insertar y mensaje P2003 confuso.
+    if (dto.materiales !== undefined && dto.materiales.length > 0) {
+      const unicos = Array.from(new Set(dto.materiales));
+      const existentes = await this.prisma.material.findMany({
+        where: { id: { in: unicos }, activo: true },
+        select: { id: true },
+      });
+      if (existentes.length !== unicos.length) {
+        const encontrados = existentes.map((m) => m.id);
+        const faltantes = unicos.filter((id) => !encontrados.includes(id));
+        throw new BadRequestException(
+          `Materiales no encontrados: ${faltantes.join(', ')}`,
+        );
+      }
+    }
 
-    if (Object.keys(data).length === 0) return this.getRecolectorProfile(userId);
+    // Todo en una transacción: campos simples + N:N (días y materiales).
+    // Si cualquier parte falla, se revierte todo.
+    await this.prisma.$transaction(async (tx) => {
+      // 1) Campos simples del recolector
+      const data: Record<string, unknown> = {};
+      if (dto.celular !== undefined) data.celular = dto.celular;
+      if (dto.direccion_domicilio !== undefined) {
+        data.direccion_domicilio = dto.direccion_domicilio;
+      }
+      if (dto.latitud !== undefined) data.latitud = dto.latitud;
+      if (dto.longitud !== undefined) data.longitud = dto.longitud;
 
-    await this.prisma.recolector.update({
-      where: { id: recolector.id },
-      data,
+      if (Object.keys(data).length > 0) {
+        await tx.recolector.update({
+          where: { id: recolector.id },
+          data,
+        });
+      }
+
+      // 2) Días de trabajo: mismo patrón que el CRUD admin
+      // (delete-all + create-many). Permite enviar [] para vaciar.
+      if (dto.dias_trabajo !== undefined) {
+        await tx.recolector_dia_trabajo.deleteMany({
+          where: { recolector_id: recolector.id },
+        });
+        if (dto.dias_trabajo.length > 0) {
+          // Deduplicar por si el cliente envía duplicados; la BD tiene
+          // UNIQUE(recolector_id, dia_semana).
+          const diasUnicos = Array.from(new Set(dto.dias_trabajo));
+          await tx.recolector_dia_trabajo.createMany({
+            data: diasUnicos.map((dia) => ({
+              recolector_id: recolector.id,
+              dia_semana: dia,
+            })),
+          });
+        }
+      }
+
+      // 3) Materiales: el recolector envía solo IDs. Mantenemos
+      // cantidad_mensual, precio_venta y es_principal bajo control del admin.
+      // Para las filas nuevas: cantidad y precio como null, es_principal=false
+      // (default de la tabla).
+      if (dto.materiales !== undefined) {
+        await tx.recolector_material.deleteMany({
+          where: { recolector_id: recolector.id },
+        });
+        if (dto.materiales.length > 0) {
+          const idsUnicos = Array.from(new Set(dto.materiales));
+          await tx.recolector_material.createMany({
+            data: idsUnicos.map((materialId) => ({
+              recolector_id: recolector.id,
+              material_id: materialId,
+              cantidad_mensual: null,
+              precio_venta: null,
+              es_principal: false,
+            })),
+          });
+        }
+      }
     });
 
     return this.getRecolectorProfile(userId);

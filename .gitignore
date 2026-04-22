@@ -63,3 +63,6 @@ mockup_*.html
 
 # Screenshots/internal images
 images/
+
+# Playwright MCP test artifacts
+.playwright-mcp/

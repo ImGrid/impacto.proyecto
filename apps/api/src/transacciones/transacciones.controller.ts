@@ -8,6 +8,7 @@ import {
   Query,
   ParseIntPipe,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { rol_usuario } from '@prisma/client';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { TransaccionesService } from './transacciones.service';
@@ -27,6 +28,12 @@ import {
 export class TransaccionesController {
   constructor(private readonly transaccionesService: TransaccionesService) {}
 
+  // Rate limit estricto en escritura: 20 transacciones/minuto por IP.
+  // Un acopiador real registra 5–15 transacciones/hora en ráfagas
+  // legítimas (cuando llegan varios recolectores juntos). 20/min es
+  // holgado para uso normal y corta intentos de enumeración o creación
+  // automatizada de fraude.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post()
   @Roles(
     rol_usuario.ADMIN,
@@ -53,8 +60,12 @@ export class TransaccionesController {
 
   @Get('pendientes')
   @Roles(rol_usuario.ACOPIADOR)
-  findPendientes(@CurrentUser('userId') userId: number) {
-    return this.transaccionesService.findPendientes(userId);
+  findPendientes(
+    @CurrentUser('userId') userId: number,
+    @Query('recolector_id', new ParseIntPipe({ optional: true }))
+    recolectorId?: number,
+  ) {
+    return this.transaccionesService.findPendientes(userId, recolectorId);
   }
 
   @Get('disponibles')

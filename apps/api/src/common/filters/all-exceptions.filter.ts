@@ -73,6 +73,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
         `${request.method} ${request.url} → ${status}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+    } else if (status === HttpStatus.FORBIDDEN) {
+      // Eventos de seguridad: log enriquecido con identidad + IP + body
+      // sanitizado para detectar enumeración / IDOR / escalación.
+      // Recomendación de Sycope (UEBA) y OWASP API Security: monitorear
+      // ratio elevado de 403 desde un mismo userId/IP es el indicador
+      // principal de ataques BOLA en curso.
+      const user = (request as any).user;
+      const userInfo = user
+        ? `user=${user.identificador} (id=${user.userId}, rol=${user.rol})`
+        : 'user=anonymous';
+      this.logger.warn(
+        `[SECURITY] FORBIDDEN ${request.method} ${request.url} → ${userInfo} ip=${request.ip} body=${JSON.stringify(this.sanitizeBody(request.body))} msg=${JSON.stringify(message)}`,
+      );
     } else {
       this.logger.warn(
         `${request.method} ${request.url} → ${status}: ${JSON.stringify(message)}`,
@@ -85,5 +98,25 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
     });
+  }
+
+  /**
+   * Quita campos sensibles del body antes de loguearlo. Nunca debemos
+   * persistir contraseñas, tokens o secretos en logs (hash o no).
+   */
+  private sanitizeBody(body: unknown): unknown {
+    if (!body || typeof body !== 'object') return body;
+    const SENSIBLES = [
+      'password',
+      'access_token',
+      'refresh_token',
+      'token',
+      'device_token',
+    ];
+    const clone: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+    for (const k of SENSIBLES) {
+      if (k in clone) clone[k] = '***';
+    }
+    return clone;
   }
 }

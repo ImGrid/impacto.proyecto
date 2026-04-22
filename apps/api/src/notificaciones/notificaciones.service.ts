@@ -318,12 +318,38 @@ export class NotificacionesService {
 
   /**
    * Marcar notificación como leída.
+   * Valida ownership (OWASP API1:2023 BOLA):
+   * - Directa (receptor_id seteado): solo el receptor puede marcarla.
+   * - Broadcast (receptor_id null): solo un recolector cuya zona coincida
+   *   con zona_id de la notificación (los demás roles no ven broadcasts).
    */
-  async markAsRead(id: number, userId: number) {
+  async markAsRead(id: number, userId: number, userRol: rol_usuario) {
     const notificacion = await this.prisma.notificacion.findUnique({
       where: { id },
     });
     if (!notificacion) throw new NotFoundException('Notificación no encontrada');
+
+    if (notificacion.receptor_id !== null) {
+      // Notificación directa: solo el destinatario.
+      if (notificacion.receptor_id !== userId) {
+        throw new ForbiddenException('No tiene acceso a esta notificación');
+      }
+    } else {
+      // Broadcast: solo un recolector de la misma zona.
+      if (userRol !== 'RECOLECTOR') {
+        throw new ForbiddenException('No tiene acceso a esta notificación');
+      }
+      const recolector = await this.prisma.recolector.findFirst({
+        where: { usuario_id: userId },
+      });
+      if (
+        !recolector ||
+        notificacion.zona_id === null ||
+        recolector.zona_id !== notificacion.zona_id
+      ) {
+        throw new ForbiddenException('No tiene acceso a esta notificación');
+      }
+    }
 
     return this.prisma.notificacion.update({
       where: { id },

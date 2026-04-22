@@ -7,6 +7,7 @@ import {
   Query,
   ParseIntPipe,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { rol_usuario } from '@prisma/client';
 import { Roles, CurrentUser } from '../auth/decorators';
 import { PagosService } from './pagos.service';
@@ -16,6 +17,11 @@ import { CreatePagoDto, PagoQueryDto } from './dto';
 export class PagosController {
   constructor(private readonly pagosService: PagosService) {}
 
+  // Rate limit estricto en escritura: 10 pagos/minuto por IP.
+  // Un acopiador típico hace 1–5 pagos al día. 10/min es ampliamente
+  // suficiente para uso normal y bloquea intentos automatizados de
+  // pagar fraudes o agotar saldo.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post()
   @Roles(rol_usuario.ACOPIADOR)
   create(

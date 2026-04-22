@@ -7,6 +7,7 @@ import {
 import { Prisma, estado_transaccion, rol_usuario } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
+import { ensureRecolectorPerteneceAlAcopiador } from '../common/auth';
 import {
   CreateTransaccionDto,
   UpdateTransaccionDto,
@@ -39,9 +40,13 @@ const transaccionInclude = {
   usuario: { select: { id: true, identificador: true, rol: true } },
 } satisfies Prisma.transaccionInclude;
 
-// Transiciones de estado válidas
+// Transiciones de estado válidas.
+// El flujo real es GENERADO → RECOLECTADO → ENTREGADO → PAGADO. El acopiador
+// nunca va directo a la sucursal del generador, por lo que GENERADO→ENTREGADO
+// no es un escenario válido y se elimina para evitar transacciones sin
+// recolector.
 const TRANSICIONES_VALIDAS: Record<string, estado_transaccion[]> = {
-  GENERADO: ['RECOLECTADO', 'ENTREGADO'],
+  GENERADO: ['RECOLECTADO'],
   RECOLECTADO: ['ENTREGADO'],
   ENTREGADO: ['PAGADO'],
 };
@@ -112,11 +117,15 @@ export class TransaccionesService {
           throw new BadRequestException('El recolector es obligatorio para el acopiador');
         }
 
-        // Verificar que el recolector existe
-        const recolector = await tx.recolector.findUnique({
-          where: { id: dto.recolector_id },
-        });
-        if (!recolector) throw new BadRequestException('Recolector no encontrado');
+        // Verificar que el recolector existe Y pertenece a este acopiador.
+        // Cierra el IDOR (BOLA) por el que un acopiador podía registrar
+        // entregas a recolectores ajenos. El check va dentro de la
+        // transacción para evitar TOCTOU.
+        await ensureRecolectorPerteneceAlAcopiador(
+          tx,
+          dto.recolector_id,
+          acopiador.id,
+        );
 
         recolectorId = dto.recolector_id;
         acopiadorId = acopiador.id;
@@ -213,13 +222,30 @@ export class TransaccionesService {
         throw new ForbiddenException('Rol no permitido para crear transacciones');
       }
 
-      // Calcular subtotales y monto total
+      // Validación de cantidad por rol. El GENERADOR puede registrar
+      // materiales sin pesar (solo avisa qué tipo de residuo tiene); el
+      // recolector que lo recoja medirá con su balanza y el acopiador
+      // verificará el peso final. El resto de roles SÍ debe especificar
+      // una cantidad mayor a 0 al crear.
+      if (userRol !== 'GENERADOR') {
+        for (const d of dto.detalles) {
+          if (d.cantidad == null || d.cantidad <= 0) {
+            throw new BadRequestException(
+              'La cantidad de cada material debe ser mayor a 0',
+            );
+          }
+        }
+      }
+
+      // Calcular subtotales y monto total. Si el generador no especificó
+      // cantidad, queda en 0 (placeholder); el subtotal y monto_total
+      // serán 0 hasta que el acopiador verifique con peso real.
       const detallesConSubtotal = dto.detalles.map((d) => ({
         material_id: d.material_id,
-        cantidad: d.cantidad,
+        cantidad: d.cantidad ?? 0,
         unidad_medida: d.unidad_medida,
         precio_unitario: d.precio_unitario ?? 0,
-        subtotal: d.cantidad * (d.precio_unitario ?? 0),
+        subtotal: (d.cantidad ?? 0) * (d.precio_unitario ?? 0),
       }));
 
       const montoTotal = detallesConSubtotal.reduce((sum, d) => sum + d.subtotal, 0);
@@ -272,7 +298,7 @@ export class TransaccionesService {
               detalles: {
                 materiales: dto.detalles.map((d) => ({
                   material_id: d.material_id,
-                  cantidad: d.cantidad,
+                  cantidad: d.cantidad ?? 0,
                   unidad_medida: d.unidad_medida,
                   precio_unitario: d.precio_unitario,
                 })),
@@ -302,6 +328,32 @@ export class TransaccionesService {
     });
 
     if (!transaccion) throw new NotFoundException('Transacción no encontrada');
+
+    // Object-level authorization (OWASP API1:2023 BOLA): validar que el usuario
+    // sea dueño del recurso antes de operar sobre él. No basta con el rol.
+    if (userRol === 'ACOPIADOR') {
+      const acopiador = await this.prisma.acopiador.findFirst({
+        where: { usuario_id: userId },
+      });
+      if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
+      if (
+        transaccion.acopiador_id !== null &&
+        transaccion.acopiador_id !== acopiador.id
+      ) {
+        throw new ForbiddenException('No tiene acceso a esta transacción');
+      }
+    } else if (userRol === 'RECOLECTOR') {
+      const recolector = await this.prisma.recolector.findFirst({
+        where: { usuario_id: userId },
+      });
+      if (!recolector) throw new ForbiddenException('Recolector no encontrado');
+      if (
+        transaccion.recolector_id !== null &&
+        transaccion.recolector_id !== recolector.id
+      ) {
+        throw new ForbiddenException('No tiene acceso a esta transacción');
+      }
+    }
 
     // Validar transición de estado
     const permitidas = TRANSICIONES_VALIDAS[transaccion.estado];
@@ -388,12 +440,24 @@ export class TransaccionesService {
 
       // Si vienen detalles nuevos, reemplazar los existentes
       if (dto.detalles?.length) {
+        // El update lo realiza RECOLECTOR (al recoger), ACOPIADOR (al
+        // verificar) o ADMIN. Ninguno de estos casos admite cantidad
+        // sin especificar — la cantidad opcional es exclusiva del
+        // GENERADOR al CREAR la transacción inicial.
+        for (const d of dto.detalles) {
+          if (d.cantidad == null || d.cantidad <= 0) {
+            throw new BadRequestException(
+              'La cantidad de cada material debe ser mayor a 0',
+            );
+          }
+        }
+
         const detallesConSubtotal = dto.detalles.map((d) => ({
           material_id: d.material_id,
-          cantidad: d.cantidad,
+          cantidad: d.cantidad ?? 0,
           unidad_medida: d.unidad_medida,
           precio_unitario: d.precio_unitario ?? 0,
-          subtotal: d.cantidad * (d.precio_unitario ?? 0),
+          subtotal: (d.cantidad ?? 0) * (d.precio_unitario ?? 0),
         }));
 
         const montoTotal = detallesConSubtotal.reduce((sum, d) => sum + d.subtotal, 0);
@@ -430,7 +494,7 @@ export class TransaccionesService {
             ? {
                 materiales: dto.detalles.map((d) => ({
                   material_id: d.material_id,
-                  cantidad: d.cantidad,
+                  cantidad: d.cantidad ?? 0,
                   unidad_medida: d.unidad_medida,
                   precio_unitario: d.precio_unitario,
                 })),
@@ -565,8 +629,9 @@ export class TransaccionesService {
   /**
    * Transacciones pendientes de verificación para un acopiador.
    * Retorna transacciones en estado RECOLECTADO de sus recolectores asignados.
+   * Se puede filtrar opcionalmente por un recolector específico.
    */
-  async findPendientes(userId: number) {
+  async findPendientes(userId: number, recolectorId?: number) {
     const acopiador = await this.prisma.acopiador.findFirst({
       where: { usuario_id: userId },
     });
@@ -576,6 +641,7 @@ export class TransaccionesService {
       where: {
         acopiador_id: acopiador.id,
         estado: 'RECOLECTADO',
+        ...(recolectorId ? { recolector_id: recolectorId } : {}),
       },
       orderBy: { fecha_creacion: 'desc' },
       include: {

@@ -69,8 +69,9 @@ export class NotificacionesController {
   markAsRead(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser('userId') userId: number,
+    @CurrentUser('rol') rol: rol_usuario,
   ) {
-    return this.notificacionesService.markAsRead(id, userId);
+    return this.notificacionesService.markAsRead(id, userId, rol);
   }
 
   @Delete(':id')

@@ -18,9 +18,14 @@ export class DetalleTransaccionDto {
   @Type(() => Number)
   material_id: number;
 
+  // Opcional a nivel DTO porque el GENERADOR puede registrar materiales
+  // sin pesarlos (solo avisa que tiene determinado tipo de residuo). Los
+  // demás roles (RECOLECTOR, ACOPIADOR, ADMIN) tienen una validación
+  // adicional en el service que exige cantidad > 0.
+  @IsOptional()
   @IsNumber()
   @Type(() => Number)
-  cantidad: number;
+  cantidad?: number;
 
   @IsEnum(unidad_medida)
   unidad_medida: unidad_medida;

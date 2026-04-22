@@ -7,6 +7,7 @@ import {
 import { Prisma, rol_usuario } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
+import { ensureRecolectorPerteneceAlAcopiador } from '../common/auth';
 import { CreatePagoDto, PagoQueryDto } from './dto';
 
 const pagoInclude = {
@@ -47,11 +48,16 @@ export class PagosService {
       });
       if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
 
-      // 2. Verificar que el recolector existe
-      const recolector = await tx.recolector.findUnique({
-        where: { id: dto.recolector_id },
-      });
-      if (!recolector) throw new BadRequestException('Recolector no encontrado');
+      // 2. Verificar que el recolector existe Y pertenece al acopiador.
+      // Defensa en profundidad: aunque las validaciones por transacción
+      // de abajo (acopiador_id de cada t === acopiador.id) ya bloquean
+      // pagos a transacciones ajenas, este check evita que datos podridos
+      // creados antes del fix del IDOR en transacciones se puedan pagar.
+      await ensureRecolectorPerteneceAlAcopiador(
+        tx,
+        dto.recolector_id,
+        acopiador.id,
+      );
 
       // 3. Obtener todas las transacciones solicitadas
       const transacciones = await tx.transaccion.findMany({
@@ -236,14 +242,13 @@ export class PagosService {
     });
     if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
 
-    // Verificar que el recolector pertenece a este acopiador
-    const recolector = await this.prisma.recolector.findUnique({
-      where: { id: recolectorId },
-    });
-    if (!recolector) throw new NotFoundException('Recolector no encontrado');
-    if (recolector.acopiador_id !== acopiador.id) {
-      throw new ForbiddenException('Este recolector no está asignado a usted');
-    }
+    // Verificar que el recolector existe y pertenece a este acopiador.
+    // El helper devuelve el recolector si todo va bien, evitando un SELECT extra.
+    const recolector = await ensureRecolectorPerteneceAlAcopiador(
+      this.prisma,
+      recolectorId,
+      acopiador.id,
+    );
 
     const transacciones = await this.prisma.transaccion.findMany({
       where: {
