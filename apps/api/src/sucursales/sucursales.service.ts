@@ -3,7 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, rol_usuario } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
 import {
@@ -78,11 +78,58 @@ export class SucursalesService {
     });
   }
 
-  async findAll(query: SucursalQueryDto) {
+  async findAll(
+    query: SucursalQueryDto,
+    userId?: number,
+    userRol?: rol_usuario,
+  ) {
+    // Derivar/validar zona según el rol para evitar IDOR. ADMIN y GENERADOR
+    // mantienen el comportamiento anterior (el GENERADOR ya se filtra
+    // naturalmente por generador_id en sus consultas).
+    let zonaIdFiltro = query.zona_id;
+
+    if (userRol === 'RECOLECTOR' && userId != null) {
+      const recolector = await this.prisma.recolector.findFirst({
+        where: { usuario_id: userId },
+        select: { zona_id: true },
+      });
+      if (!recolector) throw new ForbiddenException('Recolector no encontrado');
+      // Si manda zona_id distinta a la suya, se rechaza. Si no manda, se
+      // deriva automáticamente.
+      if (query.zona_id != null && query.zona_id !== recolector.zona_id) {
+        throw new ForbiddenException('No puede consultar sucursales de otras zonas');
+      }
+      zonaIdFiltro = recolector.zona_id;
+    } else if (userRol === 'ACOPIADOR' && userId != null) {
+      const acopiador = await this.prisma.acopiador.findFirst({
+        where: { usuario_id: userId },
+        select: { id: true, zona_id: true },
+      });
+      if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
+
+      if (query.zona_id == null) {
+        // Sin zona explícita: por defecto su propia zona.
+        zonaIdFiltro = acopiador.zona_id;
+      } else if (query.zona_id !== acopiador.zona_id) {
+        // Puede consultar otras zonas solo si tiene al menos un recolector
+        // asignado ahí (caso acopiador móvil con recolectores en zonas
+        // distintas a la suya).
+        const recolectorEnZona = await this.prisma.recolector.findFirst({
+          where: { acopiador_id: acopiador.id, zona_id: query.zona_id },
+          select: { id: true },
+        });
+        if (!recolectorEnZona) {
+          throw new ForbiddenException(
+            'No tiene recolectores asignados en esa zona',
+          );
+        }
+      }
+    }
+
     const where: Prisma.sucursalWhereInput = {
       activo: query.activo,
       generador_id: query.generador_id,
-      zona_id: query.zona_id,
+      zona_id: zonaIdFiltro,
       frecuencia: query.frecuencia,
       ...(query.search
         ? { nombre: { contains: query.search, mode: 'insensitive' as const } }

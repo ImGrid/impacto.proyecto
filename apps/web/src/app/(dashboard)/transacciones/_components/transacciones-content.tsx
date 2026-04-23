@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, X } from "lucide-react";
+import { Truck, CheckCircle2, X } from "lucide-react";
 import { useTransacciones } from "@/hooks/use-transacciones";
 import { useZonas } from "@/hooks/use-zonas";
 import type { EstadoTransaccion, Transaccion } from "@/types/api";
@@ -14,9 +14,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { columns } from "./columns";
+import { makeColumns } from "./columns";
 import { TransaccionDetailDialog } from "./transaccion-detail-dialog";
-import { TransaccionFormDialog } from "./transaccion-form-dialog";
+import { TransaccionDeleteDialog } from "./transaccion-delete-dialog";
+import { TransaccionEditDialog } from "./transaccion-edit-dialog";
+import {
+  TransaccionFormDialog,
+  type FormMode,
+} from "./transaccion-form-dialog";
 
 const estadoOptions = [
   { value: "GENERADO", label: "Generado" },
@@ -33,6 +38,26 @@ export function TransaccionesContent() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<FormMode>("recoleccion");
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Transaccion | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  function openCreate(mode: FormMode) {
+    setCreateMode(mode);
+    setCreateOpen(true);
+  }
+
+  function openEdit(t: Transaccion) {
+    setEditId(t.id);
+    setEditOpen(true);
+  }
+
+  function openDelete(t: Transaccion) {
+    setDeleteTarget(t);
+    setDeleteOpen(true);
+  }
 
   const { data, isLoading } = useTransacciones({
     page,
@@ -56,8 +81,10 @@ export function TransaccionesContent() {
     setDetailOpen(true);
   }
 
-  // Columnas con click en la fila para abrir detalle
-  const clickableColumns = columns.map((col) => {
+  // Columnas con click en la fila para abrir detalle, y botones Editar/Eliminar
+  // en la columna Acciones (que tienen stopPropagation).
+  const baseColumns = makeColumns({ onEdit: openEdit, onDelete: openDelete });
+  const clickableColumns = baseColumns.map((col) => {
     if (col.id === "acciones") return col;
     return {
       ...col,
@@ -75,9 +102,13 @@ export function TransaccionesContent() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-1 h-4 w-4" />
-          Crear transacción
+        <Button onClick={() => openCreate("recoleccion")} variant="secondary">
+          <Truck className="mr-1 h-4 w-4" />
+          Registrar recolección
+        </Button>
+        <Button onClick={() => openCreate("entrega")}>
+          <CheckCircle2 className="mr-1 h-4 w-4" />
+          Registrar entrega
         </Button>
 
         <Select
@@ -145,11 +176,32 @@ export function TransaccionesContent() {
         transaccionId={selectedId}
         open={detailOpen}
         onOpenChange={setDetailOpen}
+        onEdit={(t) => {
+          setDetailOpen(false);
+          openEdit(t);
+        }}
+        onDelete={(t) => {
+          setDetailOpen(false);
+          openDelete(t);
+        }}
       />
 
       <TransaccionFormDialog
         open={createOpen}
+        mode={createMode}
         onOpenChange={setCreateOpen}
+      />
+
+      <TransaccionEditDialog
+        transaccionId={editId}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+      />
+
+      <TransaccionDeleteDialog
+        transaccion={deleteTarget}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
       />
     </div>
   );

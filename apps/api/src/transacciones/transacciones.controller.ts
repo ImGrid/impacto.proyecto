@@ -3,10 +3,13 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
   ParseIntPipe,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { rol_usuario } from '@prisma/client';
@@ -15,6 +18,7 @@ import { TransaccionesService } from './transacciones.service';
 import {
   CreateTransaccionDto,
   UpdateTransaccionDto,
+  EditTransaccionAdminDto,
   TransaccionQueryDto,
 } from './dto';
 
@@ -92,5 +96,22 @@ export class TransaccionesController {
     @CurrentUser('rol') rol: rol_usuario,
   ) {
     return this.transaccionesService.update(id, dto, userId, rol);
+  }
+
+  // Edición admin: corrige campos sin avanzar estado.
+  @Patch(':id/editar')
+  @Roles(rol_usuario.ADMIN)
+  editAdmin(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EditTransaccionAdminDto,
+  ) {
+    return this.transaccionesService.editAdmin(id, dto);
+  }
+
+  @Delete(':id')
+  @Roles(rol_usuario.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.transaccionesService.remove(id);
   }
 }

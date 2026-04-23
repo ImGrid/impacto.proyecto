@@ -1,8 +1,8 @@
 "use client";
 
-import { Package, Truck, CheckCircle2, Banknote } from "lucide-react";
+import { Package, Truck, CheckCircle2, Banknote, Pencil, Trash2 } from "lucide-react";
 import { useTransaccionDetalle } from "@/hooks/use-transacciones";
-import type { TransaccionHistorial } from "@/types/api";
+import type { Transaccion, TransaccionDetalle, TransaccionHistorial } from "@/types/api";
 import {
   Dialog,
   DialogContent,
@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -48,6 +49,33 @@ function formatDateTime(dateStr: string): string {
   });
 }
 
+/**
+ * Arma el texto que identifica al actor de un paso del recorrido,
+ * según el rol: nombre completo + dato secundario (CI, email o sucursal).
+ * El `identificador` del usuario del historial se usa solo como fallback
+ * o para el email del acopiador (que no viene en la entidad acopiador).
+ */
+function formatActor(
+  h: TransaccionHistorial,
+  transaccion: TransaccionDetalle,
+): string {
+  const rol = h.rol_actor;
+  if (rol === "RECOLECTOR" && transaccion.recolector) {
+    return `${transaccion.recolector.nombre_completo} — CI: ${transaccion.recolector.cedula_identidad}`;
+  }
+  if (rol === "ACOPIADOR" && transaccion.acopiador) {
+    return `${transaccion.acopiador.nombre_completo} — ${h.usuario.identificador}`;
+  }
+  if (rol === "GENERADOR" && transaccion.sucursal) {
+    return `${transaccion.sucursal.generador.razon_social} — ${transaccion.sucursal.nombre}`;
+  }
+  if (rol === "ADMIN") {
+    return `Administrador (${h.usuario.identificador})`;
+  }
+  // Fallback: si no tenemos la entidad, mostramos al menos rol + identificador.
+  return `${rolLabels[rol] ?? rol} (${h.usuario.identificador})`;
+}
+
 function formatMaterialesFromDetalles(detalles: Record<string, unknown> | null): string {
   if (!detalles) return "";
   const materiales = detalles.materiales as Array<{
@@ -71,12 +99,16 @@ interface TransaccionDetailDialogProps {
   transaccionId: number | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onEdit?: (trans: Transaccion) => void;
+  onDelete?: (trans: Transaccion) => void;
 }
 
 export function TransaccionDetailDialog({
   transaccionId,
   open,
   onOpenChange,
+  onEdit,
+  onDelete,
 }: TransaccionDetailDialogProps) {
   const { data: transaccion, isLoading } = useTransaccionDetalle(
     open ? transaccionId : null,
@@ -86,11 +118,42 @@ export function TransaccionDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>
-            {transaccion
-              ? `Transacción #${transaccion.id}`
-              : "Cargando..."}
-          </DialogTitle>
+          <div className="flex items-start justify-between gap-3 pr-8">
+            <DialogTitle>
+              {transaccion ? `Transacción #${transaccion.id}` : "Cargando..."}
+            </DialogTitle>
+            {transaccion && (onEdit || onDelete) && (
+              <div className="flex gap-1">
+                {onEdit && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onEdit(transaccion)}
+                  >
+                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                    Editar
+                  </Button>
+                )}
+                {onDelete && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => onDelete(transaccion)}
+                    disabled={transaccion.estado === "PAGADO"}
+                    title={
+                      transaccion.estado === "PAGADO"
+                        ? "No se puede eliminar una entrega pagada"
+                        : "Eliminar"
+                    }
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    Eliminar
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
         </DialogHeader>
 
         {isLoading || !transaccion ? (
@@ -209,9 +272,14 @@ export function TransaccionDetailDialog({
 
             {/* Recorrido / Historial */}
             <div>
-              <h3 className="mb-4 text-sm font-semibold">
+              <h3 className="mb-2 text-sm font-semibold">
                 Recorrido de la transacción
               </h3>
+              {transaccion.usuario && (
+                <p className="mb-4 text-xs text-muted-foreground">
+                  Registrada por {rolLabels[transaccion.usuario.rol] ?? transaccion.usuario.rol} ({transaccion.usuario.identificador})
+                </p>
+              )}
               <ol className="relative border-l-2 border-muted ml-3">
                 {transaccion.transaccion_historial.map(
                   (h: TransaccionHistorial, index: number) => (
@@ -241,8 +309,7 @@ export function TransaccionDetailDialog({
                       </div>
                       <p className="mt-1 text-sm">
                         <span className="text-muted-foreground">Por:</span>{" "}
-                        {rolLabels[h.rol_actor] ?? h.rol_actor} (
-                        {h.usuario.identificador})
+                        {formatActor(h, transaccion)}
                       </p>
                       {h.detalles && (
                         <p className="mt-0.5 text-sm text-muted-foreground">

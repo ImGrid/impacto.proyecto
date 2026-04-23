@@ -70,7 +70,7 @@ export class PagosService {
         const encontrados = transacciones.map((t) => t.id);
         const faltantes = dto.transaccion_ids.filter((id) => !encontrados.includes(id));
         throw new BadRequestException(
-          `Transacciones no encontradas: ${faltantes.join(', ')}`,
+          `Estas entregas no existen: ${faltantes.join(', ')}`,
         );
       }
 
@@ -78,25 +78,25 @@ export class PagosService {
       for (const t of transacciones) {
         if (t.estado !== 'ENTREGADO') {
           throw new BadRequestException(
-            `La transacción #${t.id} no está en estado ENTREGADO (estado actual: ${t.estado})`,
+            `La entrega #${t.id} aún no puede pagarse (estado actual: ${t.estado})`,
           );
         }
 
         if (t.recolector_id !== dto.recolector_id) {
           throw new BadRequestException(
-            `La transacción #${t.id} no pertenece al recolector seleccionado`,
+            `La entrega #${t.id} no pertenece al recolector seleccionado`,
           );
         }
 
         if (t.acopiador_id !== acopiador.id) {
           throw new ForbiddenException(
-            `La transacción #${t.id} no pertenece a este acopiador`,
+            `La entrega #${t.id} no le pertenece`,
           );
         }
 
         if (t.pago_transaccion) {
           throw new BadRequestException(
-            `La transacción #${t.id} ya fue pagada`,
+            `La entrega #${t.id} ya fue pagada`,
           );
         }
       }

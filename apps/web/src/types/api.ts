@@ -335,7 +335,11 @@ export type Transaccion = {
   fecha_creacion: string;
   estado: EstadoTransaccion;
   creado_por_id: number | null;
-  recolector: { id: number; nombre_completo: string } | null;
+  recolector: {
+    id: number;
+    nombre_completo: string;
+    cedula_identidad: string;
+  } | null;
   acopiador: { id: number; nombre_completo: string; nombre_punto: string } | null;
   zona: { id: number; nombre: string };
   detalle_transaccion: DetalleTransaccion[];
@@ -348,6 +352,13 @@ export type TransaccionDetalle = Transaccion & {
     generador: { id: number; razon_social: string };
   } | null;
   transaccion_historial: TransaccionHistorial[];
+  // Usuario que registró la transacción (puede ser el admin, el propio
+  // recolector, acopiador, etc.). Apunta a `creado_por_id`.
+  usuario: {
+    id: number;
+    identificador: string;
+    rol: string;
+  } | null;
 };
 
 export type CreateTransaccionDetalle = {
@@ -367,6 +378,18 @@ export type CreateTransaccionInput = {
   hora?: string;
   observaciones?: string;
   detalles: CreateTransaccionDetalle[];
+};
+
+// Input para la edición admin (PATCH /transacciones/:id/editar). Cualquier
+// campo omitido se mantiene. `sucursal_id: null` elimina la sucursal
+// explícitamente.
+export type EditTransaccionAdminInput = {
+  observaciones?: string;
+  fecha?: string;
+  hora?: string;
+  recolector_id?: number;
+  sucursal_id?: number | null;
+  detalles?: CreateTransaccionDetalle[];
 };
 
 // --- Pagos ---
@@ -392,6 +415,92 @@ export type Pago = {
   recolector: { id: number; nombre_completo: string };
   acopiador: { id: number; nombre_completo: string };
   pago_transaccion: PagoTransaccion[];
+};
+
+// --- Dashboard ---
+
+export type DashboardData = {
+  kpis: {
+    total_recolectado_kg: number;
+    total_recolectado_kg_prev: number;
+    total_generado_bs: number;
+    total_generado_bs_prev: number;
+    co2_evitado_kg: number;
+    co2_evitado_kg_prev: number;
+    recolectoras_activas: number;
+    recolectoras_activas_prev: number;
+  };
+  alertas: {
+    pendientes_pago_count: number;
+    pendientes_pago_monto: number;
+    pendientes_verificacion_count: number;
+  };
+  evolucion_mensual: { mes: string; kg: number; bs: number }[];
+  distribucion_material: {
+    id: number;
+    nombre: string;
+    kg: number;
+    porcentaje: number;
+  }[];
+  top_recolectoras: {
+    id: number;
+    nombre: string;
+    kg: number;
+    bs: number;
+  }[];
+  top_sucursales: {
+    id: number;
+    nombre: string;
+    generador: string;
+    kg: number;
+  }[];
+};
+
+// --- Estadísticas ---
+
+export type EstadisticasFilters = {
+  desde?: string;
+  hasta?: string;
+  zona_id?: number;
+  material_id?: number;
+};
+
+export type EstadisticasData = {
+  rango: {
+    desde: string;
+    hasta: string;
+    prev_desde: string;
+    prev_hasta: string;
+  };
+  kpis: DashboardData["kpis"];
+  por_recolectora: {
+    id: number;
+    nombre: string;
+    ci: string;
+    kg: number;
+    bs: number;
+    co2_kg: number;
+  }[];
+  por_sucursal: {
+    id: number;
+    nombre: string;
+    generador: string;
+    kg: number;
+    bs: number;
+  }[];
+  por_material: {
+    id: number;
+    nombre: string;
+    factor_co2: number | null;
+    kg: number;
+    co2_evitado_kg: number;
+    porcentaje: number;
+  }[];
+  evolucion_diaria: {
+    fecha: string;
+    kg: number;
+    bs: number;
+  }[];
 };
 
 // --- Paginación ---

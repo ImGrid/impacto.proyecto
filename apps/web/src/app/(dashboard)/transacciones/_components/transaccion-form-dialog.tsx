@@ -6,17 +6,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Loader2, Plus, Trash2 } from "lucide-react";
+import { CalendarIcon, Loader2, Plus, Trash2, Info } from "lucide-react";
 import { useCreateTransaccion } from "@/hooks/use-transacciones";
 import { useRecolectores } from "@/hooks/use-recolectores";
-import { useAcopiadores } from "@/hooks/use-acopiadores";
 import { useSucursales } from "@/hooks/use-sucursales";
 import { useMateriales } from "@/hooks/use-materiales";
-import type {
-  EstadoTransaccion,
-  UnidadMedida,
-  CreateTransaccionInput,
-} from "@/types/api";
+import type { UnidadMedida, CreateTransaccionInput } from "@/types/api";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -51,25 +46,6 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 
-// Estado PAGADO no se permite: es exclusivo del flujo de pago del acopiador.
-const estadoOptions: { value: EstadoTransaccion; label: string; help: string }[] = [
-  {
-    value: "GENERADO",
-    label: "Generado",
-    help: "El generador registró residuos disponibles en una sucursal.",
-  },
-  {
-    value: "RECOLECTADO",
-    label: "Recolectado",
-    help: "El recolector recogió los residuos; falta entregarlos al acopiador.",
-  },
-  {
-    value: "ENTREGADO",
-    label: "Entregado",
-    help: "Flujo completo registrado; el acopiador recibió los materiales.",
-  },
-];
-
 const unidadOptions: { value: UnidadMedida; label: string }[] = [
   { value: "KG", label: "KG" },
   { value: "UNIDAD", label: "Unidad" },
@@ -77,7 +53,22 @@ const unidadOptions: { value: UnidadMedida; label: string }[] = [
   { value: "TONELADA", label: "Tonelada" },
 ];
 
-const detalleSchema = z.object({
+/**
+ * Modo del formulario:
+ * - "recoleccion": el recolector ya recogió pero aún no entregó al acopiador.
+ *   No se pide precio; se asigna acopiador automático por relación fija.
+ * - "entrega": flujo completo recolector → acopiador (sin pago). Se exigen
+ *   precios; también se asigna el acopiador automático del recolector.
+ */
+export type FormMode = "recoleccion" | "entrega";
+
+interface TransaccionFormDialogProps {
+  open: boolean;
+  mode: FormMode;
+  onOpenChange: (open: boolean) => void;
+}
+
+const baseDetalle = z.object({
   material_id: z.string().min(1, "Seleccione un material"),
   cantidad: z
     .string()
@@ -87,54 +78,51 @@ const detalleSchema = z.object({
   precio_unitario: z.string().optional(),
 });
 
-const formSchema = z
-  .object({
-    estado: z.enum(["GENERADO", "RECOLECTADO", "ENTREGADO"]),
-    recolector_id: z.string().optional(),
-    acopiador_id: z.string().optional(),
-    sucursal_id: z.string().optional(),
-    fecha: z.date().optional(),
-    hora: z.string().optional(),
-    observaciones: z.string().max(500, "Máximo 500 caracteres").optional(),
-    detalles: z
-      .array(detalleSchema)
-      .min(1, "Debe registrar al menos un material"),
-  })
-  .superRefine((data, ctx) => {
-    if (data.estado === "GENERADO" && !data.sucursal_id) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["sucursal_id"],
-        message: "La sucursal es obligatoria para el estado GENERADO",
-      });
-    }
-    if (
-      (data.estado === "RECOLECTADO" || data.estado === "ENTREGADO") &&
-      !data.recolector_id
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["recolector_id"],
-        message: "El recolector es obligatorio",
-      });
-    }
-    if (data.estado === "ENTREGADO" && !data.acopiador_id) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["acopiador_id"],
-        message: "El acopiador es obligatorio para el estado ENTREGADO",
-      });
-    }
-    if (data.fecha && data.fecha > new Date()) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["fecha"],
-        message: "La fecha no puede ser futura",
-      });
-    }
-  });
+function buildSchema(mode: FormMode) {
+  return z
+    .object({
+      recolector_id: z.string().min(1, "Indique qué recolector recogió"),
+      sucursal_id: z.string().optional(),
+      fecha: z.date().optional(),
+      hora: z.string().optional(),
+      observaciones: z.string().max(500, "Máximo 500 caracteres").optional(),
+      detalles: z.array(baseDetalle).min(1, "Debe registrar al menos un material"),
+    })
+    .superRefine((data, ctx) => {
+      if (data.fecha && data.fecha > new Date()) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["fecha"],
+          message: "La fecha no puede ser futura",
+        });
+      }
+      if (mode === "entrega") {
+        data.detalles.forEach((d, i) => {
+          if (!d.precio_unitario || Number(d.precio_unitario) <= 0) {
+            ctx.addIssue({
+              code: "custom",
+              path: ["detalles", i, "precio_unitario"],
+              message: "El precio es obligatorio",
+            });
+          }
+        });
+      }
+    });
+}
 
-type FormValues = z.infer<typeof formSchema>;
+type FormValues = {
+  recolector_id: string;
+  sucursal_id?: string;
+  fecha?: Date;
+  hora?: string;
+  observaciones?: string;
+  detalles: {
+    material_id: string;
+    cantidad: string;
+    unidad_medida: UnidadMedida;
+    precio_unitario?: string;
+  }[];
+};
 
 const defaultDetalle = {
   material_id: "",
@@ -143,36 +131,27 @@ const defaultDetalle = {
   precio_unitario: "",
 };
 
-interface TransaccionFormDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}
-
 export function TransaccionFormDialog({
   open,
+  mode,
   onOpenChange,
 }: TransaccionFormDialogProps) {
   const createMutation = useCreateTransaccion();
   const isPending = createMutation.isPending;
 
-  // Catálogos (solo activos)
   const { data: recolectoresData } = useRecolectores({
-    limit: 100,
-    activo: true,
-  });
-  const { data: acopiadoresData } = useAcopiadores({
     limit: 100,
     activo: true,
   });
   const { data: sucursalesData } = useSucursales({ limit: 100, activo: true });
   const { data: materialesData } = useMateriales({ limit: 100, activo: true });
 
+  const schema = buildSchema(mode);
+
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(schema),
     defaultValues: {
-      estado: "ENTREGADO",
       recolector_id: "",
-      acopiador_id: "",
       sucursal_id: "",
       fecha: undefined,
       hora: "",
@@ -186,14 +165,15 @@ export function TransaccionFormDialog({
     name: "detalles",
   });
 
-  const estado = form.watch("estado");
+  const recolectorId = form.watch("recolector_id");
+  const recolectorSeleccionado = recolectoresData?.data.find(
+    (r) => String(r.id) === recolectorId,
+  );
 
   useEffect(() => {
     if (open) {
       form.reset({
-        estado: "ENTREGADO",
         recolector_id: "",
-        acopiador_id: "",
         sucursal_id: "",
         fecha: undefined,
         hora: "",
@@ -201,36 +181,24 @@ export function TransaccionFormDialog({
         detalles: [defaultDetalle],
       });
     }
-  }, [open, form]);
-
-  // Al cambiar de estado, limpiar campos que no aplican para no enviar datos erróneos
-  useEffect(() => {
-    if (estado === "GENERADO") {
-      form.setValue("recolector_id", "");
-      form.setValue("acopiador_id", "");
-    } else if (estado === "RECOLECTADO") {
-      form.setValue("sucursal_id", "");
-    } else if (estado === "ENTREGADO") {
-      form.setValue("sucursal_id", "");
-    }
-  }, [estado, form]);
+  }, [open, form, mode]);
 
   function onSubmit(data: FormValues) {
     const payload: CreateTransaccionInput = {
-      estado: data.estado,
+      estado: mode === "recoleccion" ? "RECOLECTADO" : "ENTREGADO",
+      recolector_id: Number(data.recolector_id),
       observaciones: data.observaciones || undefined,
       detalles: data.detalles.map((d) => ({
         material_id: Number(d.material_id),
         cantidad: Number(d.cantidad),
         unidad_medida: d.unidad_medida,
-        precio_unitario: d.precio_unitario
-          ? Number(d.precio_unitario)
-          : undefined,
+        precio_unitario:
+          mode === "entrega" && d.precio_unitario
+            ? Number(d.precio_unitario)
+            : undefined,
       })),
     };
 
-    if (data.recolector_id) payload.recolector_id = Number(data.recolector_id);
-    if (data.acopiador_id) payload.acopiador_id = Number(data.acopiador_id);
     if (data.sucursal_id) payload.sucursal_id = Number(data.sucursal_id);
     if (data.fecha) payload.fecha = format(data.fecha, "yyyy-MM-dd");
     if (data.hora) payload.hora = data.hora;
@@ -240,18 +208,21 @@ export function TransaccionFormDialog({
     });
   }
 
-  const estadoHelp = estadoOptions.find((o) => o.value === estado)?.help;
+  const titulo =
+    mode === "recoleccion" ? "Registrar recolección" : "Registrar entrega";
+  const descripcion =
+    mode === "recoleccion"
+      ? "El recolector recogió pero aún no entregó al acopiador. No se pide precio; el acopiador lo completará al verificar."
+      : "Flujo completo: el recolector ya entregó al acopiador. Se registran cantidades y precios finales.";
+  const labelConfirmar =
+    mode === "recoleccion" ? "Registrar recolección" : "Registrar entrega";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Crear transacción</DialogTitle>
-          <DialogDescription>
-            Registra manualmente una transacción en cualquier estado del flujo
-            (excepto PAGADO, que se maneja desde el flujo de pago del
-            acopiador).
-          </DialogDescription>
+          <DialogTitle>{titulo}</DialogTitle>
+          <DialogDescription>{descripcion}</DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
@@ -259,15 +230,76 @@ export function TransaccionFormDialog({
             onSubmit={form.handleSubmit(onSubmit)}
             className="space-y-4"
           >
+            {/* Recolector */}
             <FormField
               control={form.control}
-              name="estado"
+              name="recolector_id"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Estado inicial</FormLabel>
+                  <FormLabel>Recolector</FormLabel>
                   <Select
                     onValueChange={field.onChange}
                     value={field.value}
+                    disabled={isPending}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Seleccionar recolector" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {recolectoresData?.data.map((r) => (
+                        <SelectItem key={r.id} value={String(r.id)}>
+                          {r.nombre_completo} ({r.cedula_identidad})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Info acopiador heredado: readonly */}
+            {recolectorSeleccionado && (
+              <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3 text-sm">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <div>
+                  <p className="text-muted-foreground text-xs">
+                    Acopiador asignado
+                  </p>
+                  <p className="font-medium">
+                    {recolectorSeleccionado.acopiador.nombre_completo}
+                    {recolectorSeleccionado.acopiador.nombre_punto && (
+                      <span className="text-muted-foreground">
+                        {" "}— {recolectorSeleccionado.acopiador.nombre_punto}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-muted-foreground text-xs mt-0.5">
+                    El recolector siempre entrega a su acopiador asignado.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Sucursal opcional */}
+            <FormField
+              control={form.control}
+              name="sucursal_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    Sucursal de origen{" "}
+                    <span className="text-muted-foreground text-xs font-normal">
+                      (opcional)
+                    </span>
+                  </FormLabel>
+                  <Select
+                    onValueChange={(v) =>
+                      field.onChange(v === "__none__" ? "" : v)
+                    }
+                    value={field.value || "__none__"}
                     disabled={isPending}
                   >
                     <FormControl>
@@ -276,126 +308,18 @@ export function TransaccionFormDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {estadoOptions.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
+                      <SelectItem value="__none__">No especificar</SelectItem>
+                      {sucursalesData?.data.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          {s.generador.razon_social} — {s.nombre}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {estadoHelp && (
-                    <p className="text-muted-foreground text-xs">
-                      {estadoHelp}
-                    </p>
-                  )}
                   <FormMessage />
                 </FormItem>
               )}
             />
-
-            {/* Sucursal: solo para GENERADO */}
-            {estado === "GENERADO" && (
-              <FormField
-                control={form.control}
-                name="sucursal_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Sucursal</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                      disabled={isPending}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccionar sucursal" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {sucursalesData?.data.map((s) => (
-                          <SelectItem key={s.id} value={String(s.id)}>
-                            {s.generador.razon_social} — {s.nombre}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            )}
-
-            {/* Recolector: para RECOLECTADO y ENTREGADO */}
-            {(estado === "RECOLECTADO" || estado === "ENTREGADO") && (
-              <FormField
-                control={form.control}
-                name="recolector_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Recolector</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                      disabled={isPending}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccionar recolector" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {recolectoresData?.data.map((r) => (
-                          <SelectItem key={r.id} value={String(r.id)}>
-                            {r.nombre_completo} ({r.cedula_identidad})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            )}
-
-            {/* Acopiador: obligatorio en ENTREGADO, opcional en RECOLECTADO */}
-            {(estado === "RECOLECTADO" || estado === "ENTREGADO") && (
-              <FormField
-                control={form.control}
-                name="acopiador_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>
-                      Acopiador
-                      {estado === "RECOLECTADO" && (
-                        <span className="text-muted-foreground text-xs font-normal">
-                          {" "}
-                          (opcional — si se omite se hereda del recolector)
-                        </span>
-                      )}
-                    </FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                      disabled={isPending}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Seleccionar acopiador" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {acopiadoresData?.data.map((a) => (
-                          <SelectItem key={a.id} value={String(a.id)}>
-                            {a.nombre_completo} — {a.nombre_punto}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            )}
 
             {/* Fecha y hora opcionales (backdating) */}
             <div className="grid grid-cols-2 gap-4">
@@ -464,7 +388,7 @@ export function TransaccionFormDialog({
               />
             </div>
 
-            {/* Detalles: array dinámico */}
+            {/* Materiales */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <FormLabel>Materiales</FormLabel>
@@ -491,7 +415,11 @@ export function TransaccionFormDialog({
                     control={form.control}
                     name={`detalles.${index}.material_id`}
                     render={({ field: selectField }) => (
-                      <FormItem className="col-span-4">
+                      <FormItem
+                        className={
+                          mode === "entrega" ? "col-span-4" : "col-span-6"
+                        }
+                      >
                         <Select
                           onValueChange={selectField.onChange}
                           value={selectField.value}
@@ -562,26 +490,33 @@ export function TransaccionFormDialog({
                     )}
                   />
 
-                  <FormField
-                    control={form.control}
-                    name={`detalles.${index}.precio_unitario`}
-                    render={({ field: inputField }) => (
-                      <FormItem className="col-span-3">
-                        <FormControl>
-                          <Input
-                            type="number"
-                            step="any"
-                            placeholder="Precio (Bs)"
-                            disabled={isPending}
-                            {...inputField}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {mode === "entrega" && (
+                    <FormField
+                      control={form.control}
+                      name={`detalles.${index}.precio_unitario`}
+                      render={({ field: inputField }) => (
+                        <FormItem className="col-span-3">
+                          <FormControl>
+                            <Input
+                              type="number"
+                              step="any"
+                              placeholder="Precio (Bs)"
+                              disabled={isPending}
+                              {...inputField}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
 
-                  <div className="col-span-1 flex justify-end pt-1">
+                  <div
+                    className={cn(
+                      "flex justify-end pt-1",
+                      mode === "entrega" ? "col-span-1" : "col-span-2",
+                    )}
+                  >
                     <Button
                       type="button"
                       variant="ghost"
@@ -609,7 +544,11 @@ export function TransaccionFormDialog({
                   </FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="Notas sobre la transacción"
+                      placeholder={
+                        mode === "recoleccion"
+                          ? "Notas sobre la recolección"
+                          : "Notas sobre la entrega"
+                      }
                       disabled={isPending}
                       rows={2}
                       {...field}
@@ -636,7 +575,7 @@ export function TransaccionFormDialog({
                     Guardando...
                   </>
                 ) : (
-                  "Crear transacción"
+                  labelConfirmar
                 )}
               </Button>
             </DialogFooter>

@@ -13,6 +13,15 @@ const cookieOptions = {
   path: "/",
 };
 
+// El access_token del backend expira a los 15 min. La cookie la hacemos
+// durar 13 min (2 min menos) para que el navegador la "borre" antes de
+// que el JWT realmente caduque: así la siguiente llamada al proxy llega
+// sin access cookie y el proxy dispara un refresh limpio, en lugar de
+// mandar un JWT vencido y caer en race con el refresh.
+// Referencia: https://dev.to/silentwatcher_95/race-conditions-in-jwt-refresh-token-rotation-3j5k
+const ACCESS_COOKIE_MAX_AGE = 13 * 60;
+const REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60;
+
 export type LoginState = {
   error?: string;
 } | null;
@@ -56,12 +65,12 @@ export async function login(
 
     cookieStore.set("access_token", data.access_token, {
       ...cookieOptions,
-      maxAge: 15 * 60,
+      maxAge: ACCESS_COOKIE_MAX_AGE,
     });
 
     cookieStore.set("refresh_token", data.refresh_token, {
       ...cookieOptions,
-      maxAge: 7 * 24 * 60 * 60,
+      maxAge: REFRESH_COOKIE_MAX_AGE,
     });
 
   } catch {

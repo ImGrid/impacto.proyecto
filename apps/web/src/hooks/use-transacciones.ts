@@ -7,13 +7,14 @@ import {
   keepPreviousData,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { clientGet, clientPost } from "@/lib/client-api";
+import { clientGet, clientPost, clientPatch, clientDelete } from "@/lib/client-api";
 import type {
   Transaccion,
   TransaccionDetalle,
   PaginatedResponse,
   EstadoTransaccion,
   CreateTransaccionInput,
+  EditTransaccionAdminInput,
 } from "@/types/api";
 
 export const transaccionesKeys = {
@@ -75,6 +76,49 @@ export function useCreateTransaccion() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: transaccionesKeys.lists() });
       toast.success("Transacción creada exitosamente");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/**
+ * Edición admin: corrige campos de una entrega sin avanzar el estado.
+ * El backend valida las reglas (PAGADA solo permite observaciones,
+ * recolector debe ser del mismo acopiador, etc.).
+ */
+export function useEditTransaccionAdmin(id: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: EditTransaccionAdminInput) =>
+      clientPatch<TransaccionDetalle>(`/transacciones/${id}/editar`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: transaccionesKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: transaccionesKeys.detail(id),
+      });
+      toast.success("Entrega actualizada");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/**
+ * Hard delete de una entrega. El backend bloquea con 400 si la entrega
+ * tiene un pago registrado.
+ */
+export function useDeleteTransaccion() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) => clientDelete(`/transacciones/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: transaccionesKeys.lists() });
+      toast.success("Entrega eliminada");
     },
     onError: (error: Error) => {
       toast.error(error.message);

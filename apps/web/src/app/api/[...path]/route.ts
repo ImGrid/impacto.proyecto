@@ -10,6 +10,12 @@ const cookieOptions = {
   path: "/",
 };
 
+// Mismo skew que en actions/auth.ts: la cookie del access dura 2 min
+// menos que el JWT (15 min backend → 13 min cookie) para evitar que
+// el navegador mande un JWT vencido justo en el límite.
+const ACCESS_COOKIE_MAX_AGE = 13 * 60;
+const REFRESH_COOKIE_MAX_AGE = 7 * 24 * 60 * 60;
+
 async function tryRefresh(
   refreshToken: string,
 ): Promise<{ access_token: string; refresh_token: string } | null> {
@@ -66,11 +72,11 @@ async function proxyRequest(req: NextRequest) {
       // Actualizar cookies con nuevos tokens
       cookieStore.set("access_token", tokens.access_token, {
         ...cookieOptions,
-        maxAge: 15 * 60,
+        maxAge: ACCESS_COOKIE_MAX_AGE,
       });
       cookieStore.set("refresh_token", tokens.refresh_token, {
         ...cookieOptions,
-        maxAge: 7 * 24 * 60 * 60,
+        maxAge: REFRESH_COOKIE_MAX_AGE,
       });
 
       headers["Authorization"] = `Bearer ${tokens.access_token}`;

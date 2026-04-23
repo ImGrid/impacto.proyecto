@@ -32,9 +32,18 @@ export class SucursalesController {
   }
 
   @Get()
-  @Roles(rol_usuario.ADMIN, rol_usuario.GENERADOR)
-  findAll(@Query() query: SucursalQueryDto) {
-    return this.sucursalesService.findAll(query);
+  @Roles(
+    rol_usuario.ADMIN,
+    rol_usuario.GENERADOR,
+    rol_usuario.RECOLECTOR,
+    rol_usuario.ACOPIADOR,
+  )
+  findAll(
+    @Query() query: SucursalQueryDto,
+    @CurrentUser('userId') userId: number,
+    @CurrentUser('rol') userRol: rol_usuario,
+  ) {
+    return this.sucursalesService.findAll(query, userId, userRol);
   }
 
   @Get(':id')

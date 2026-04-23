@@ -22,6 +22,7 @@ import { AdministradoresModule } from "./administradores";
 import { TransaccionesModule } from "./transacciones";
 import { PagosModule } from "./pagos";
 import { PerfilModule } from "./perfil";
+import { DashboardModule } from "./dashboard";
 
 @Module({
   imports: [
@@ -76,6 +77,9 @@ import { PerfilModule } from "./perfil";
 
     // Módulo - Perfil propio
     PerfilModule,
+
+    // Módulo - Dashboard (KPIs, gráficos y alertas del panel admin)
+    DashboardModule,
 
     // Rate limiting: 100 requests por minuto por IP
     ThrottlerModule.forRoot([

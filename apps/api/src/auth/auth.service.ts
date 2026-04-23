@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
 import { LoginDto } from './dto';
@@ -57,7 +57,55 @@ export class AuthService {
     return tokens;
   }
 
+  // Cache en-memoria para defender contra race conditions cuando dos
+  // refresh llegan con el mismo refresh_token casi al mismo tiempo
+  // (middleware + fetch del cliente, dos tabs, etc.). Si una rotación
+  // ya terminó en los últimos RACE_WINDOW_MS, el segundo refresh
+  // recibe el mismo par de tokens en vez de un 403. La ventana es
+  // corta para no abrir una puerta a replay.
+  //
+  // Referencias consultadas:
+  //   - https://gist.github.com/Daanieeel/6e4d07bb797de96e469d2a1129bd3891
+  //   - https://dev.to/silentwatcher_95/race-conditions-in-jwt-refresh-token-rotation-3j5k
+  //   - vercel/next.js discussion #78604
+  private readonly refreshCache = new Map<
+    string,
+    { promise: Promise<{ access_token: string; refresh_token: string }>; expiresAt: number }
+  >();
+  private readonly REFRESH_RACE_WINDOW_MS = 5_000;
+
   async refreshTokens(userId: number, refreshToken: string) {
+    const tokenHash = this.hashToken(refreshToken);
+    const cacheKey = `${userId}:${tokenHash}`;
+
+    // Coalescing: si ya hay un refresh en vuelo (o recién terminado)
+    // con el mismo refresh_token, devolvemos el mismo resultado.
+    const cached = this.refreshCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.promise;
+    }
+
+    const promise = this.doRefresh(userId, refreshToken);
+    this.refreshCache.set(cacheKey, {
+      promise,
+      expiresAt: Date.now() + this.REFRESH_RACE_WINDOW_MS,
+    });
+
+    // Si el refresh falla, eliminar del cache inmediatamente para no
+    // atrapar errores durante la ventana.
+    promise.catch(() => {
+      this.refreshCache.delete(cacheKey);
+    });
+
+    // Cleanup automático al cerrar la ventana.
+    setTimeout(() => {
+      this.refreshCache.delete(cacheKey);
+    }, this.REFRESH_RACE_WINDOW_MS).unref?.();
+
+    return promise;
+  }
+
+  private async doRefresh(userId: number, refreshToken: string) {
     // 1. Buscar la sesión por hash del token
     const tokenHash = this.hashToken(refreshToken);
     const sesion = await this.prisma.sesion_refresh.findFirst({
@@ -132,9 +180,15 @@ export class AuthService {
   private async generateTokens(userId: number, identificador: string, rol: string) {
     const payload: JwtPayload = { sub: userId, identificador, rol };
 
+    // El refresh lleva un `jti` (JWT ID) único para que cada emisión sea
+    // distinta incluso cuando dos refresh caen en el mismo segundo
+    // (iat tiene resolución de 1 segundo; sin jti el token rotado
+    // queda idéntico al anterior). RFC 7519 §4.1.7.
+    const refreshPayload = { ...payload, jti: randomUUID() };
+
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload),
-      this.jwtService.signAsync(payload, {
+      this.jwtService.signAsync(refreshPayload, {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: this.configService.get('JWT_REFRESH_EXPIRATION', '7d'),
       }),
