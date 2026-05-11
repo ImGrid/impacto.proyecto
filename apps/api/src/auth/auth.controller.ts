@@ -7,9 +7,15 @@ import {
   UseGuards,
   Headers,
 } from '@nestjs/common';
+import { rol_usuario } from '@prisma/client';
 import { AuthService } from './auth.service';
-import { LoginDto, RefreshDto, DeviceTokenDto } from './dto';
-import { Public, CurrentUser } from './decorators';
+import {
+  LoginDto,
+  RefreshDto,
+  DeviceTokenDto,
+  SwitchDepartamentoDto,
+} from './dto';
+import { Public, CurrentUser, Roles } from './decorators';
 import { RefreshTokenGuard } from './guards';
 
 @Controller('auth')
@@ -30,8 +36,19 @@ export class AuthController {
   @UseGuards(RefreshTokenGuard)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  refresh(@CurrentUser() user: { userId: number; refreshToken: string }) {
-    return this.authService.refreshTokens(user.userId, user.refreshToken);
+  refresh(
+    @CurrentUser()
+    user: {
+      userId: number;
+      refreshToken: string;
+      departamento_activo: number | null;
+    },
+  ) {
+    return this.authService.refreshTokens(
+      user.userId,
+      user.refreshToken,
+      user.departamento_activo,
+    );
   }
 
   @Post('logout')
@@ -56,5 +73,25 @@ export class AuthController {
     @Body() dto: DeviceTokenDto,
   ) {
     return this.authService.updateDeviceToken(userId, dto.device_token);
+  }
+
+  /**
+   * Cambia el departamento activo de la sesión del admin.
+   * Invalida todas las sesiones del usuario y emite un par nuevo de tokens
+   * con el nuevo `departamento_activo`. Solo aplica a rol ADMIN.
+   */
+  @Roles(rol_usuario.ADMIN)
+  @Post('switch-departamento')
+  @HttpCode(HttpStatus.OK)
+  switchDepartamento(
+    @CurrentUser('userId') userId: number,
+    @Body() dto: SwitchDepartamentoDto,
+    @Headers('user-agent') userAgent?: string,
+  ) {
+    return this.authService.switchDepartamento(
+      userId,
+      dto.departamento_id,
+      userAgent,
+    );
   }
 }

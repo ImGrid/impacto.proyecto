@@ -21,6 +21,7 @@ export class AccessTokenStrategy extends PassportStrategy(Strategy, 'jwt') {
       userId: payload.sub,
       identificador: payload.identificador,
       rol: payload.rol,
+      departamento_activo: payload.departamento_activo ?? null,
     };
   }
 }

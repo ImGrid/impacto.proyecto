@@ -5,7 +5,6 @@ import dynamic from "next/dynamic";
 import { Plus, Search, TableProperties, Map, X } from "lucide-react";
 import { useRecolectores, useRecolectoresMapa } from "@/hooks/use-recolectores";
 import { useZonas } from "@/hooks/use-zonas";
-import { useAcopiadores } from "@/hooks/use-acopiadores";
 import { useAsociaciones } from "@/hooks/use-asociaciones";
 import { useMateriales } from "@/hooks/use-materiales";
 import {
@@ -43,7 +42,6 @@ export function RecolectoresContent() {
   const [createOpen, setCreateOpen] = useState(false);
   const [activo, setActivo] = useState<boolean | undefined>(undefined);
   const [zonaId, setZonaId] = useState<number | undefined>(undefined);
-  const [acopiadorId, setAcopiadorId] = useState<number | undefined>(undefined);
   const [asociacionId, setAsociacionId] = useState<number | undefined>(undefined);
   const [genero, setGenero] = useState<string | undefined>(undefined);
   const [trabajaIndividual, setTrabajaIndividual] = useState<boolean | undefined>(undefined);
@@ -55,7 +53,6 @@ export function RecolectoresContent() {
     search,
     activo,
     zona_id: zonaId,
-    acopiador_id: acopiadorId,
     asociacion_id: asociacionId,
     genero,
     trabaja_individual: trabajaIndividual,
@@ -65,14 +62,12 @@ export function RecolectoresContent() {
   const { data: recolectoresMapaData } = useRecolectoresMapa();
 
   const { data: zonasOpts } = useZonas({ limit: 100, activo: true });
-  const { data: acopiadoresOpts } = useAcopiadores({ limit: 100, activo: true });
   const { data: asociacionesOpts } = useAsociaciones({ limit: 100, activo: true });
   const { data: materialesOpts } = useMateriales({ limit: 100, activo: true });
 
   const hasFilters =
     activo !== undefined ||
     zonaId !== undefined ||
-    acopiadorId !== undefined ||
     asociacionId !== undefined ||
     genero !== undefined ||
     trabajaIndividual !== undefined ||
@@ -86,7 +81,6 @@ export function RecolectoresContent() {
   function clearFilters() {
     setActivo(undefined);
     setZonaId(undefined);
-    setAcopiadorId(undefined);
     setAsociacionId(undefined);
     setGenero(undefined);
     setTrabajaIndividual(undefined);
@@ -154,33 +148,13 @@ export function RecolectoresContent() {
         </Select>
 
         <Select
-          value={acopiadorId === undefined ? "all" : String(acopiadorId)}
-          onValueChange={(value) => {
-            setAcopiadorId(value === "all" ? undefined : Number(value));
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Acopiador" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los acopiadores</SelectItem>
-            {acopiadoresOpts?.data.map((a) => (
-              <SelectItem key={a.id} value={String(a.id)}>
-                {a.nombre_completo}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select
           value={asociacionId === undefined ? "all" : String(asociacionId)}
           onValueChange={(value) => {
             setAsociacionId(value === "all" ? undefined : Number(value));
             setPage(1);
           }}
         >
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[220px]">
             <SelectValue placeholder="Asociación" />
           </SelectTrigger>
           <SelectContent>
@@ -240,7 +214,7 @@ export function RecolectoresContent() {
             setPage(1);
           }}
         >
-          <SelectTrigger className="w-[160px]">
+          <SelectTrigger className="w-[200px]">
             <SelectValue placeholder="Material" />
           </SelectTrigger>
           <SelectContent>

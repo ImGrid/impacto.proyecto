@@ -17,11 +17,6 @@ export class RecolectorQueryDto extends PaginationQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  acopiador_id?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
   asociacion_id?: number;
 
   @IsOptional()

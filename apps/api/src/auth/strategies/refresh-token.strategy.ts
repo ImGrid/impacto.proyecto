@@ -30,6 +30,7 @@ export class RefreshTokenStrategy extends PassportStrategy(
       userId: payload.sub,
       identificador: payload.identificador,
       rol: payload.rol,
+      departamento_activo: payload.departamento_activo ?? null,
       refreshToken,
     };
   }

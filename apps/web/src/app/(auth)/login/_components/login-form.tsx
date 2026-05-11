@@ -8,6 +8,7 @@ import { z } from "zod/v4";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { login, type LoginState } from "@/app/actions/auth";
+import type { Departamento } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,15 +19,27 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const loginSchema = z.object({
   identificador: z.string().min(1, "Ingrese su email, CI o teléfono"),
   password: z.string().min(6, "Mínimo 6 caracteres"),
+  departamento_id: z.string().min(1, "Seleccione un departamento"),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-export function LoginForm() {
+interface LoginFormProps {
+  departamentos: Departamento[];
+}
+
+export function LoginForm({ departamentos }: LoginFormProps) {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/";
 
@@ -40,6 +53,7 @@ export function LoginForm() {
     defaultValues: {
       identificador: "",
       password: "",
+      departamento_id: "",
     },
   });
 
@@ -54,15 +68,61 @@ export function LoginForm() {
     const formData = new FormData();
     formData.append("identificador", data.identificador);
     formData.append("password", data.password);
+    formData.append("departamento_id", data.departamento_id);
     formData.append("callbackUrl", callbackUrl);
     startTransition(() => {
       formAction(formData);
     });
   }
 
+  // Si no hay departamentos disponibles, mostrar aviso claro y deshabilitar
+  // el formulario: sin un departamento el admin no puede iniciar sesión.
+  if (departamentos.length === 0) {
+    return (
+      <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm">
+        <p className="font-medium text-destructive">
+          No se pudieron cargar los departamentos.
+        </p>
+        <p className="mt-1 text-muted-foreground">
+          Verifique su conexión y vuelva a cargar la página. Si el problema
+          continúa, contacte al soporte técnico.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <FormField
+          control={form.control}
+          name="departamento_id"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Departamento</FormLabel>
+              <Select
+                onValueChange={field.onChange}
+                value={field.value}
+                disabled={isPending}
+              >
+                <FormControl>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Seleccione su departamento" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {departamentos.map((d) => (
+                    <SelectItem key={d.id} value={String(d.id)}>
+                      {d.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
         <FormField
           control={form.control}
           name="identificador"

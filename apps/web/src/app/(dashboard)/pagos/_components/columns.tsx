@@ -32,9 +32,9 @@ export const columns: ColumnDef<Pago>[] = [
     cell: ({ row }) => row.original.recolector.nombre_completo,
   },
   {
-    id: "acopiador",
-    header: "Acopiador",
-    cell: ({ row }) => row.original.acopiador.nombre_completo,
+    id: "centro_operacional",
+    header: "Centro operacional",
+    cell: ({ row }) => row.original.centro_operacional.nombre_completo,
   },
   {
     id: "monto",

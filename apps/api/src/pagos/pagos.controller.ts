@@ -37,8 +37,9 @@ export class PagosController {
     @Query() query: PagoQueryDto,
     @CurrentUser('userId') userId: number,
     @CurrentUser('rol') rol: rol_usuario,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.pagosService.findAll(query, userId, rol);
+    return this.pagosService.findAll(query, userId, rol, departamentoActivo);
   }
 
   @Get('pendientes/:recolectorId')
@@ -56,7 +57,8 @@ export class PagosController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser('userId') userId: number,
     @CurrentUser('rol') rol: rol_usuario,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.pagosService.findOne(id, userId, rol);
+    return this.pagosService.findOne(id, userId, rol, departamentoActivo);
   }
 }

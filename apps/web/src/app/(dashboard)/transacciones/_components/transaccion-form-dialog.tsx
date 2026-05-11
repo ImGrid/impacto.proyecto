@@ -6,11 +6,13 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Loader2, Plus, Trash2, Info } from "lucide-react";
+import { CalendarIcon, Loader2, Plus, Trash2 } from "lucide-react";
 import { useCreateTransaccion } from "@/hooks/use-transacciones";
 import { useRecolectores } from "@/hooks/use-recolectores";
 import { useSucursales } from "@/hooks/use-sucursales";
 import { useMateriales } from "@/hooks/use-materiales";
+import { useCentrosOperacionales } from "@/hooks/use-centros-operacionales";
+import { useExternos } from "@/hooks/use-externos";
 import type { UnidadMedida, CreateTransaccionInput } from "@/types/api";
 import { cn } from "@/lib/utils";
 import {
@@ -55,10 +57,10 @@ const unidadOptions: { value: UnidadMedida; label: string }[] = [
 
 /**
  * Modo del formulario:
- * - "recoleccion": el recolector ya recogió pero aún no entregó al acopiador.
- *   No se pide precio; se asigna acopiador automático por relación fija.
- * - "entrega": flujo completo recolector → acopiador (sin pago). Se exigen
- *   precios; también se asigna el acopiador automático del recolector.
+ * - "recoleccion": el admin registra que se recolectó. Backend asigna
+ *   estado=RECOLECTADO. El destino se ignora (siempre queda vacío).
+ * - "entrega": flujo completo con destino. Backend asigna estado=ENTREGADO.
+ *   El destino es libre: centro operacional / externo / desconocido / sin asignar.
  */
 export type FormMode = "recoleccion" | "entrega";
 
@@ -68,6 +70,10 @@ interface TransaccionFormDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+// Tipo de destino para el modo "entrega". El backend reconstruye los 3 campos
+// polimórficos a partir de esta elección.
+type TipoDestino = "ninguno" | "centro_op" | "externo" | "desconocido";
+
 const baseDetalle = z.object({
   material_id: z.string().min(1, "Seleccione un material"),
   cantidad: z
@@ -76,16 +82,23 @@ const baseDetalle = z.object({
     .refine((v) => Number(v) > 0, "La cantidad debe ser mayor a 0"),
   unidad_medida: z.enum(["KG", "UNIDAD", "BOLSA", "TONELADA"]),
   precio_unitario: z.string().optional(),
+  // Sucursal de origen de esta línea (opcional). Permite indicar que el
+  // material provino de un punto específico — útil cuando el recolector
+  // consolida material de varias sucursales en una sola entrega.
+  sucursal_id: z.string().optional(),
 });
 
 function buildSchema(mode: FormMode) {
   return z
     .object({
       recolector_id: z.string().min(1, "Indique qué recolector recogió"),
-      sucursal_id: z.string().optional(),
       fecha: z.date().optional(),
       hora: z.string().optional(),
       observaciones: z.string().max(500, "Máximo 500 caracteres").optional(),
+      // Destino polimórfico — solo aplica al modo "entrega".
+      tipo_destino: z.enum(["ninguno", "centro_op", "externo", "desconocido"]),
+      centro_operacional_id: z.string().optional(),
+      acopiador_externo_id: z.string().optional(),
       detalles: z.array(baseDetalle).min(1, "Debe registrar al menos un material"),
     })
     .superRefine((data, ctx) => {
@@ -97,6 +110,7 @@ function buildSchema(mode: FormMode) {
         });
       }
       if (mode === "entrega") {
+        // Precio obligatorio para cada material.
         data.detalles.forEach((d, i) => {
           if (!d.precio_unitario || Number(d.precio_unitario) <= 0) {
             ctx.addIssue({
@@ -106,21 +120,45 @@ function buildSchema(mode: FormMode) {
             });
           }
         });
+        // Si elige centro_op o externo, el dropdown asociado es obligatorio.
+        if (
+          data.tipo_destino === "centro_op" &&
+          !data.centro_operacional_id
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["centro_operacional_id"],
+            message: "Seleccione el centro operacional",
+          });
+        }
+        if (
+          data.tipo_destino === "externo" &&
+          !data.acopiador_externo_id
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["acopiador_externo_id"],
+            message: "Seleccione el acopiador/comprador externo",
+          });
+        }
       }
     });
 }
 
 type FormValues = {
   recolector_id: string;
-  sucursal_id?: string;
   fecha?: Date;
   hora?: string;
   observaciones?: string;
+  tipo_destino: TipoDestino;
+  centro_operacional_id?: string;
+  acopiador_externo_id?: string;
   detalles: {
     material_id: string;
     cantidad: string;
     unidad_medida: UnidadMedida;
     precio_unitario?: string;
+    sucursal_id?: string;
   }[];
 };
 
@@ -129,6 +167,18 @@ const defaultDetalle = {
   cantidad: "",
   unidad_medida: "KG" as UnidadMedida,
   precio_unitario: "",
+  sucursal_id: "",
+};
+
+const defaultValues: FormValues = {
+  recolector_id: "",
+  fecha: undefined,
+  hora: "",
+  observaciones: "",
+  tipo_destino: "ninguno",
+  centro_operacional_id: "",
+  acopiador_externo_id: "",
+  detalles: [defaultDetalle],
 };
 
 export function TransaccionFormDialog({
@@ -145,19 +195,17 @@ export function TransaccionFormDialog({
   });
   const { data: sucursalesData } = useSucursales({ limit: 100, activo: true });
   const { data: materialesData } = useMateriales({ limit: 100, activo: true });
+  const { data: centrosData } = useCentrosOperacionales({
+    limit: 100,
+    activo: true,
+  });
+  const { data: externosData } = useExternos({ limit: 100, activo: true });
 
   const schema = buildSchema(mode);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: {
-      recolector_id: "",
-      sucursal_id: "",
-      fecha: undefined,
-      hora: "",
-      observaciones: "",
-      detalles: [defaultDetalle],
-    },
+    defaultValues,
   });
 
   const detallesFields = useFieldArray({
@@ -165,21 +213,11 @@ export function TransaccionFormDialog({
     name: "detalles",
   });
 
-  const recolectorId = form.watch("recolector_id");
-  const recolectorSeleccionado = recolectoresData?.data.find(
-    (r) => String(r.id) === recolectorId,
-  );
+  const tipoDestino = form.watch("tipo_destino");
 
   useEffect(() => {
     if (open) {
-      form.reset({
-        recolector_id: "",
-        sucursal_id: "",
-        fecha: undefined,
-        hora: "",
-        observaciones: "",
-        detalles: [defaultDetalle],
-      });
+      form.reset(defaultValues);
     }
   }, [open, form, mode]);
 
@@ -196,12 +234,27 @@ export function TransaccionFormDialog({
           mode === "entrega" && d.precio_unitario
             ? Number(d.precio_unitario)
             : undefined,
+        ...(d.sucursal_id ? { sucursal_id: Number(d.sucursal_id) } : {}),
       })),
     };
 
-    if (data.sucursal_id) payload.sucursal_id = Number(data.sucursal_id);
     if (data.fecha) payload.fecha = format(data.fecha, "yyyy-MM-dd");
     if (data.hora) payload.hora = data.hora;
+
+    // Destino polimórfico solo aplica al modo entrega; recoleccion lo ignora.
+    if (mode === "entrega") {
+      if (data.tipo_destino === "centro_op" && data.centro_operacional_id) {
+        payload.centro_operacional_id = Number(data.centro_operacional_id);
+      } else if (
+        data.tipo_destino === "externo" &&
+        data.acopiador_externo_id
+      ) {
+        payload.acopiador_externo_id = Number(data.acopiador_externo_id);
+      } else if (data.tipo_destino === "desconocido") {
+        payload.destino_desconocido = true;
+      }
+      // "ninguno" → no se envía ningún campo de destino.
+    }
 
     createMutation.mutate(payload, {
       onSuccess: () => onOpenChange(false),
@@ -212,8 +265,8 @@ export function TransaccionFormDialog({
     mode === "recoleccion" ? "Registrar recolección" : "Registrar entrega";
   const descripcion =
     mode === "recoleccion"
-      ? "El recolector recogió pero aún no entregó al acopiador. No se pide precio; el acopiador lo completará al verificar."
-      : "Flujo completo: el recolector ya entregó al acopiador. Se registran cantidades y precios finales.";
+      ? "El recolector recogió pero aún no entregó. No se pide precio ni destino; el centro operacional los completará al verificar."
+      : "Flujo completo: el recolector ya entregó. Se registran cantidades, precios y destino final.";
   const labelConfirmar =
     mode === "recoleccion" ? "Registrar recolección" : "Registrar entrega";
 
@@ -260,66 +313,132 @@ export function TransaccionFormDialog({
               )}
             />
 
-            {/* Info acopiador heredado: readonly */}
-            {recolectorSeleccionado && (
-              <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3 text-sm">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                <div>
-                  <p className="text-muted-foreground text-xs">
-                    Acopiador asignado
-                  </p>
-                  <p className="font-medium">
-                    {recolectorSeleccionado.acopiador.nombre_completo}
-                    {recolectorSeleccionado.acopiador.nombre_punto && (
-                      <span className="text-muted-foreground">
-                        {" "}— {recolectorSeleccionado.acopiador.nombre_punto}
-                      </span>
+            {/* Destino polimórfico — solo en modo entrega */}
+            {mode === "entrega" && (
+              <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                <FormField
+                  control={form.control}
+                  name="tipo_destino"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Destino de la entrega</FormLabel>
+                      <Select
+                        onValueChange={(v: TipoDestino) => {
+                          field.onChange(v);
+                          // Limpiar dropdowns dependientes al cambiar el tipo.
+                          if (v !== "centro_op") {
+                            form.setValue("centro_operacional_id", "");
+                          }
+                          if (v !== "externo") {
+                            form.setValue("acopiador_externo_id", "");
+                          }
+                        }}
+                        value={field.value}
+                        disabled={isPending}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="ninguno">
+                            Sin asignar (pendiente)
+                          </SelectItem>
+                          <SelectItem value="centro_op">
+                            Centro operacional
+                          </SelectItem>
+                          <SelectItem value="externo">
+                            Acopiador/comprador externo
+                          </SelectItem>
+                          <SelectItem value="desconocido">
+                            Desconocido
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {tipoDestino === "centro_op" && (
+                  <FormField
+                    control={form.control}
+                    name="centro_operacional_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Centro operacional</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                          disabled={isPending}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Seleccionar centro" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {centrosData?.data.map((c) => (
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.nombre_completo} — {c.nombre_punto}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
                     )}
+                  />
+                )}
+
+                {tipoDestino === "externo" && (
+                  <FormField
+                    control={form.control}
+                    name="acopiador_externo_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Acopiador/comprador externo</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                          disabled={isPending}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Seleccionar externo" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {externosData?.data.map((e) => (
+                              <SelectItem key={e.id} value={String(e.id)}>
+                                {e.nombre}
+                                {e.asociacion ? ` (${e.asociacion})` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                {tipoDestino === "desconocido" && (
+                  <p className="text-muted-foreground text-xs italic">
+                    Se entregó pero no se sabe a quién. Esta entrega queda en
+                    ENTREGADO indefinidamente (no genera pago).
                   </p>
-                  <p className="text-muted-foreground text-xs mt-0.5">
-                    El recolector siempre entrega a su acopiador asignado.
+                )}
+
+                {tipoDestino === "ninguno" && (
+                  <p className="text-muted-foreground text-xs italic">
+                    Destino pendiente. Podrá asignarse después editando la
+                    entrega o cuando un centro operacional la verifique.
                   </p>
-                </div>
+                )}
               </div>
             )}
-
-            {/* Sucursal opcional */}
-            <FormField
-              control={form.control}
-              name="sucursal_id"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>
-                    Sucursal de origen{" "}
-                    <span className="text-muted-foreground text-xs font-normal">
-                      (opcional)
-                    </span>
-                  </FormLabel>
-                  <Select
-                    onValueChange={(v) =>
-                      field.onChange(v === "__none__" ? "" : v)
-                    }
-                    value={field.value || "__none__"}
-                    disabled={isPending}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="__none__">No especificar</SelectItem>
-                      {sucursalesData?.data.map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>
-                          {s.generador.razon_social} — {s.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
 
             {/* Fecha y hora opcionales (backdating) */}
             <div className="grid grid-cols-2 gap-4">
@@ -409,8 +528,9 @@ export function TransaccionFormDialog({
               {detallesFields.fields.map((field, index) => (
                 <div
                   key={field.id}
-                  className="grid grid-cols-12 items-start gap-2 rounded-md border p-3"
+                  className="space-y-2 rounded-md border p-3"
                 >
+                <div className="grid grid-cols-12 items-start gap-2">
                   <FormField
                     control={form.control}
                     name={`detalles.${index}.material_id`}
@@ -523,10 +643,53 @@ export function TransaccionFormDialog({
                       size="icon"
                       onClick={() => detallesFields.remove(index)}
                       disabled={isPending || detallesFields.fields.length === 1}
+                      aria-label="Quitar línea"
+                      title="Quitar línea"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
+                </div>
+
+                {/* Origen (sucursal) por línea — opcional. Permite indicar
+                    desde qué sucursal vino este material específico cuando
+                    el recolector consolidó material de varias sucursales. */}
+                <FormField
+                  control={form.control}
+                  name={`detalles.${index}.sucursal_id`}
+                  render={({ field: selectField }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-muted-foreground">
+                        Origen{" "}
+                        <span className="font-normal">(opcional)</span>
+                      </FormLabel>
+                      <Select
+                        onValueChange={(v) =>
+                          selectField.onChange(v === "__none__" ? "" : v)
+                        }
+                        value={selectField.value || "__none__"}
+                        disabled={isPending}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="__none__">
+                            Sin especificar origen
+                          </SelectItem>
+                          {sucursalesData?.data.map((s) => (
+                            <SelectItem key={s.id} value={String(s.id)}>
+                              {s.generador.razon_social} — {s.nombre}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 </div>
               ))}
             </div>

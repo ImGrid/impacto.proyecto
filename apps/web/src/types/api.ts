@@ -1,3 +1,22 @@
+// --- Geografía ---
+
+export type Departamento = {
+  id: number;
+  nombre: string;
+  codigo: string | null;
+  activo: boolean;
+  fecha_creacion: string;
+};
+
+export type Ciudad = {
+  id: number;
+  departamento_id: number;
+  nombre: string;
+  activo: boolean;
+  fecha_creacion: string;
+  departamento: { id: number; nombre: string };
+};
+
 export type Zona = {
   id: number;
   nombre: string;
@@ -5,6 +24,7 @@ export type Zona = {
   latitud: number | null;
   longitud: number | null;
   radio_km: number | null;
+  ciudad_id: number;
   activo: boolean;
   fecha_creacion: string;
 };
@@ -86,7 +106,10 @@ export type Generador = {
 
 export type TipoAcopio = "FIJO" | "MOVIL";
 
-export type Acopiador = {
+// Antes "Acopiador". Renombrado a Centro Operacional como parte del cambio
+// definitivo: rompe el vínculo fijo recolector ↔ acopiador y modela el actor
+// como un punto operacional del depto.
+export type CentroOperacional = {
   id: number;
   usuario_id: number;
   nombre_completo: string;
@@ -98,6 +121,7 @@ export type Acopiador = {
   latitud: number | null;
   longitud: number | null;
   zona_id: number;
+  departamento_id: number;
   horario_operacion: string | null;
   activo: boolean;
   fecha_creacion: string;
@@ -109,6 +133,23 @@ export type Acopiador = {
     id: number;
     nombre: string;
   };
+  departamento: {
+    id: number;
+    nombre: string;
+  };
+};
+
+// Catálogo global de acopiadores/compradores externos. NO son usuarios del
+// sistema: no tienen login, no son centros operacionales y nunca generan pagos.
+// Son solo un destino posible para una transacción.
+export type AcopiadorCompradorExterno = {
+  id: number;
+  nombre: string;
+  asociacion: string | null;
+  telefono: string | null;
+  observacion: string | null;
+  activo: boolean;
+  fecha_creacion: string;
 };
 
 export type FrecuenciaRecojo =
@@ -203,8 +244,8 @@ export type Recolector = {
   direccion_domicilio: string;
   latitud: number;
   longitud: number;
-  acopiador_id: number;
   zona_id: number;
+  departamento_id: number;
   asociacion_id: number | null;
   genero: Genero;
   edad: number;
@@ -215,12 +256,11 @@ export type Recolector = {
     email: string | null;
     activo: boolean;
   };
-  acopiador: {
-    id: number;
-    nombre_completo: string;
-    nombre_punto: string;
-  };
   zona: {
+    id: number;
+    nombre: string;
+  };
+  departamento: {
     id: number;
     nombre: string;
   };
@@ -300,10 +340,19 @@ export type DetalleTransaccion = {
   unidad_medida: string;
   precio_unitario: string;
   subtotal: string;
+  // Sucursal de origen de esta línea (cambio 2.6). NULL = origen no
+  // identificado. Permite que una sola entrega tenga material proveniente
+  // de varias sucursales distintas, con desglose por material y cantidad.
+  sucursal_id: number | null;
   material: {
     id: number;
     nombre: string;
   };
+  sucursal: {
+    id: number;
+    nombre: string;
+    generador: { id: number; razon_social: string };
+  } | null;
 };
 
 export type TransaccionHistorial = {
@@ -322,13 +371,18 @@ export type TransaccionHistorial = {
   };
 };
 
+// Destino polimórfico: como máximo uno de los 3 campos está marcado
+// (centro_operacional_id, acopiador_externo_id, destino_desconocido=true).
+// El CHECK constraint `chk_destino_unico` en BD enforce esa unicidad.
+// Los 3 vacíos también es válido (entrega sin destino asignado).
 export type Transaccion = {
   id: number;
   fecha: string;
   hora: string;
   recolector_id: number | null;
-  acopiador_id: number | null;
-  sucursal_id: number | null;
+  centro_operacional_id: number | null;
+  acopiador_externo_id: number | null;
+  destino_desconocido: boolean;
   zona_id: number;
   monto_total: string;
   observaciones: string | null;
@@ -340,20 +394,27 @@ export type Transaccion = {
     nombre_completo: string;
     cedula_identidad: string;
   } | null;
-  acopiador: { id: number; nombre_completo: string; nombre_punto: string } | null;
+  centro_operacional: {
+    id: number;
+    nombre_completo: string;
+    nombre_punto: string;
+  } | null;
+  acopiador_comprador_externo: {
+    id: number;
+    nombre: string;
+    asociacion: string | null;
+  } | null;
   zona: { id: number; nombre: string };
+  // Con el cambio 2.6 la sucursal pasa a vivir en cada `DetalleTransaccion`.
+  // Por eso `Transaccion.sucursal` ya no existe; en su lugar, las sucursales
+  // de origen se derivan de `detalle_transaccion[*].sucursal`.
   detalle_transaccion: DetalleTransaccion[];
 };
 
 export type TransaccionDetalle = Transaccion & {
-  sucursal: {
-    id: number;
-    nombre: string;
-    generador: { id: number; razon_social: string };
-  } | null;
   transaccion_historial: TransaccionHistorial[];
-  // Usuario que registró la transacción (puede ser el admin, el propio
-  // recolector, acopiador, etc.). Apunta a `creado_por_id`.
+  // Usuario que registró la transacción (puede ser admin, recolector, centro op,
+  // o generador). Apunta a `creado_por_id`.
   usuario: {
     id: number;
     identificador: string;
@@ -366,13 +427,19 @@ export type CreateTransaccionDetalle = {
   cantidad: number;
   unidad_medida: UnidadMedida;
   precio_unitario?: number;
+  // Sucursal de origen de esta línea (cambio 2.6). Opcional: NULL/omitido =
+  // origen no identificado. Permite registrar que un mismo material vino
+  // de una sucursal específica para reportes de trazabilidad.
+  sucursal_id?: number;
 };
 
 export type CreateTransaccionInput = {
   estado?: EstadoTransaccion;
   recolector_id?: number;
-  acopiador_id?: number;
-  sucursal_id?: number;
+  // Destino polimórfico al crear. Máximo uno; los 3 vacíos = sin destino.
+  centro_operacional_id?: number;
+  acopiador_externo_id?: number;
+  destino_desconocido?: boolean;
   zona_id?: number;
   fecha?: string;
   hora?: string;
@@ -381,14 +448,18 @@ export type CreateTransaccionInput = {
 };
 
 // Input para la edición admin (PATCH /transacciones/:id/editar). Cualquier
-// campo omitido se mantiene. `sucursal_id: null` elimina la sucursal
-// explícitamente.
+// campo omitido se mantiene. Para el destino: enviar cualquiera de los 3
+// campos redefine el destino completo (los otros 2 se limpian); todos
+// `undefined` preserva el destino actual. Las sucursales de origen se
+// gestionan reemplazando `detalles` (cada línea con su `sucursal_id` opcional).
 export type EditTransaccionAdminInput = {
   observaciones?: string;
   fecha?: string;
   hora?: string;
   recolector_id?: number;
-  sucursal_id?: number | null;
+  centro_operacional_id?: number | null;
+  acopiador_externo_id?: number | null;
+  destino_desconocido?: boolean;
   detalles?: CreateTransaccionDetalle[];
 };
 
@@ -407,13 +478,13 @@ export type PagoTransaccion = {
 export type Pago = {
   id: number;
   recolector_id: number;
-  acopiador_id: number;
+  centro_operacional_id: number;
   monto_total: string;
   fecha_pago: string;
   observaciones: string | null;
   fecha_creacion: string;
   recolector: { id: number; nombre_completo: string };
-  acopiador: { id: number; nombre_completo: string };
+  centro_operacional: { id: number; nombre_completo: string };
   pago_transaccion: PagoTransaccion[];
 };
 

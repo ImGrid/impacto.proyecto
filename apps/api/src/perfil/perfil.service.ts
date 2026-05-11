@@ -19,7 +19,7 @@ export class PerfilService {
       return this.getRecolectorProfile(userId);
     }
     if (userRol === 'ACOPIADOR') {
-      return this.getAcopiadorProfile(userId);
+      return this.getCentroOperacionalProfile(userId);
     }
     if (userRol === 'GENERADOR') {
       return this.getGeneradorProfile(userId);
@@ -42,7 +42,7 @@ export class PerfilService {
       return this.updateRecolectorProfile(userId, dto);
     }
     if (userRol === 'ACOPIADOR') {
-      return this.updateAcopiadorProfile(userId, dto);
+      return this.updateCentroOperacionalProfile(userId, dto);
     }
     if (userRol === 'GENERADOR') {
       return this.updateGeneradorProfile(userId, dto);
@@ -60,8 +60,8 @@ export class PerfilService {
       where: { usuario_id: userId },
       include: {
         usuario: { select: { identificador: true, email: true, activo: true } },
-        acopiador: { select: { id: true, nombre_completo: true, nombre_punto: true } },
         zona: { select: { id: true, nombre: true } },
+        departamento: { select: { id: true, nombre: true } },
         asociacion: { select: { id: true, nombre: true } },
         recolector_dia_trabajo: { select: { dia_semana: true } },
         recolector_material: {
@@ -163,25 +163,33 @@ export class PerfilService {
     return this.getRecolectorProfile(userId);
   }
 
-  // --- Acopiador ---
+  // --- Centro operacional (rol ACOPIADOR del enum) ---
 
-  private async getAcopiadorProfile(userId: number) {
-    const acopiador = await this.prisma.acopiador.findFirst({
+  private async getCentroOperacionalProfile(userId: number) {
+    const centro = await this.prisma.centro_operacional.findFirst({
       where: { usuario_id: userId },
       include: {
         usuario: { select: { identificador: true, email: true, activo: true } },
         zona: { select: { id: true, nombre: true } },
+        departamento: { select: { id: true, nombre: true } },
       },
     });
-    if (!acopiador) throw new ForbiddenException('Perfil de acopiador no encontrado');
-    return { rol: 'ACOPIADOR', ...acopiador };
+    if (!centro) {
+      throw new ForbiddenException('Perfil de centro operacional no encontrado');
+    }
+    return { rol: 'ACOPIADOR', ...centro };
   }
 
-  private async updateAcopiadorProfile(userId: number, dto: UpdatePerfilDto) {
-    const acopiador = await this.prisma.acopiador.findFirst({
+  private async updateCentroOperacionalProfile(
+    userId: number,
+    dto: UpdatePerfilDto,
+  ) {
+    const centro = await this.prisma.centro_operacional.findFirst({
       where: { usuario_id: userId },
     });
-    if (!acopiador) throw new ForbiddenException('Perfil de acopiador no encontrado');
+    if (!centro) {
+      throw new ForbiddenException('Perfil de centro operacional no encontrado');
+    }
 
     const data: Record<string, unknown> = {};
     if (dto.celular !== undefined) data.celular = dto.celular;
@@ -190,14 +198,16 @@ export class PerfilService {
     if (dto.longitud !== undefined) data.longitud = dto.longitud;
     if (dto.horario_operacion !== undefined) data.horario_operacion = dto.horario_operacion;
 
-    if (Object.keys(data).length === 0) return this.getAcopiadorProfile(userId);
+    if (Object.keys(data).length === 0) {
+      return this.getCentroOperacionalProfile(userId);
+    }
 
-    await this.prisma.acopiador.update({
-      where: { id: acopiador.id },
+    await this.prisma.centro_operacional.update({
+      where: { id: centro.id },
       data,
     });
 
-    return this.getAcopiadorProfile(userId);
+    return this.getCentroOperacionalProfile(userId);
   }
 
   // --- Generador ---

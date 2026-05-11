@@ -57,6 +57,7 @@ export function useCreateZona() {
 
   return useMutation({
     mutationFn: (data: {
+      ciudad_id: number;
       nombre: string;
       descripcion?: string;
       latitud?: number;
@@ -83,6 +84,7 @@ export function useUpdateZona() {
     }: {
       id: number;
       data: {
+        ciudad_id?: number;
         nombre?: string;
         descripcion?: string;
         latitud?: number | null;

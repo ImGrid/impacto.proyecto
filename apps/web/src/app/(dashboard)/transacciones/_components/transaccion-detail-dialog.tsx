@@ -27,7 +27,7 @@ const estadoBadgeConfig: Record<
 const rolLabels: Record<string, string> = {
   GENERADOR: "Generador",
   RECOLECTOR: "Recolector",
-  ACOPIADOR: "Acopiador",
+  ACOPIADOR: "Centro operacional",
   ADMIN: "Administrador",
 };
 
@@ -63,11 +63,24 @@ function formatActor(
   if (rol === "RECOLECTOR" && transaccion.recolector) {
     return `${transaccion.recolector.nombre_completo} — CI: ${transaccion.recolector.cedula_identidad}`;
   }
-  if (rol === "ACOPIADOR" && transaccion.acopiador) {
-    return `${transaccion.acopiador.nombre_completo} — ${h.usuario.identificador}`;
+  if (rol === "ACOPIADOR" && transaccion.centro_operacional) {
+    return `${transaccion.centro_operacional.nombre_completo} — ${h.usuario.identificador}`;
   }
-  if (rol === "GENERADOR" && transaccion.sucursal) {
-    return `${transaccion.sucursal.generador.razon_social} — ${transaccion.sucursal.nombre}`;
+  if (rol === "GENERADOR") {
+    // Con multi-sucursal, el paso GENERADO automático puede asociarse a
+    // una sucursal específica que viene en `h.detalles.sucursal_id`. Si la
+    // encontramos en los detalles de la transacción, mostramos su nombre.
+    const sucursalIdMeta = (h.detalles as { sucursal_id?: number } | null)
+      ?.sucursal_id;
+    if (sucursalIdMeta != null) {
+      const det = transaccion.detalle_transaccion.find(
+        (d) => d.sucursal_id === sucursalIdMeta,
+      );
+      if (det?.sucursal) {
+        return `${det.sucursal.generador.razon_social} — ${det.sucursal.nombre}`;
+      }
+    }
+    return `Generador (${h.usuario.identificador})`;
   }
   if (rol === "ADMIN") {
     return `Administrador (${h.usuario.identificador})`;
@@ -194,17 +207,33 @@ export function TransaccionDetailDialog({
                 </p>
               </div>
               <div>
-                <p className="text-muted-foreground">Acopiador</p>
+                <p className="text-muted-foreground">Destino</p>
                 <p className="font-medium">
-                  {transaccion.acopiador?.nombre_completo ?? "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Generador / Sucursal</p>
-                <p className="font-medium">
-                  {transaccion.sucursal
-                    ? `${transaccion.sucursal.generador.razon_social} → ${transaccion.sucursal.nombre}`
-                    : "—"}
+                  {transaccion.centro_operacional ? (
+                    <>
+                      {transaccion.centro_operacional.nombre_completo}
+                      <span className="text-muted-foreground text-xs block font-normal">
+                        Centro operacional —{" "}
+                        {transaccion.centro_operacional.nombre_punto}
+                      </span>
+                    </>
+                  ) : transaccion.acopiador_comprador_externo ? (
+                    <>
+                      {transaccion.acopiador_comprador_externo.nombre}
+                      <span className="text-muted-foreground text-xs block font-normal">
+                        Acopiador/comprador externo
+                        {transaccion.acopiador_comprador_externo.asociacion
+                          ? ` — ${transaccion.acopiador_comprador_externo.asociacion}`
+                          : ""}
+                      </span>
+                    </>
+                  ) : transaccion.destino_desconocido ? (
+                    <span className="italic text-muted-foreground">
+                      Desconocido
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                 </p>
               </div>
               <div>
@@ -233,6 +262,9 @@ export function TransaccionDetailDialog({
                       <th className="px-3 py-2 text-left font-medium">
                         Material
                       </th>
+                      <th className="px-3 py-2 text-left font-medium">
+                        Origen
+                      </th>
                       <th className="px-3 py-2 text-right font-medium">
                         Cantidad
                       </th>
@@ -248,6 +280,20 @@ export function TransaccionDetailDialog({
                     {transaccion.detalle_transaccion.map((d) => (
                       <tr key={d.id} className="border-b last:border-0">
                         <td className="px-3 py-2">{d.material.nombre}</td>
+                        <td className="px-3 py-2">
+                          {d.sucursal ? (
+                            <span>
+                              {d.sucursal.nombre}
+                              <span className="block text-xs text-muted-foreground">
+                                {d.sucursal.generador.razon_social}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground italic">
+                              Sin especificar
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           {d.cantidad} {d.unidad_medida.toLowerCase()}
                         </td>
@@ -267,6 +313,74 @@ export function TransaccionDetailDialog({
                 </table>
               </div>
             </div>
+
+            {/* Resumen por sucursal: agrega kg y Bs por cada sucursal
+                distinta presente en los detalles. Solo se muestra si hay
+                al menos una sucursal asignada (caso multi-origen). */}
+            {(() => {
+              const resumen = new Map<
+                number,
+                {
+                  nombre: string;
+                  generador: string;
+                  kg: number;
+                  bs: number;
+                  unidades: number;
+                }
+              >();
+              for (const d of transaccion.detalle_transaccion) {
+                if (!d.sucursal) continue;
+                const acc = resumen.get(d.sucursal.id) ?? {
+                  nombre: d.sucursal.nombre,
+                  generador: d.sucursal.generador.razon_social,
+                  kg: 0,
+                  bs: 0,
+                  unidades: 0,
+                };
+                if (d.unidad_medida === "KG") {
+                  acc.kg += Number(d.cantidad);
+                } else {
+                  acc.unidades += Number(d.cantidad);
+                }
+                acc.bs += Number(d.subtotal);
+                resumen.set(d.sucursal.id, acc);
+              }
+              if (resumen.size === 0) return null;
+              return (
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold">
+                    Resumen por sucursal de origen
+                  </h3>
+                  <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+                    {Array.from(resumen.values()).map((r, i) => (
+                      <div
+                        key={i}
+                        className="flex items-baseline justify-between text-sm"
+                      >
+                        <div>
+                          <span className="font-medium">{r.nombre}</span>
+                          <span className="block text-xs text-muted-foreground">
+                            {r.generador}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-medium">
+                            {r.kg > 0 ? `${r.kg} kg` : ""}
+                            {r.kg > 0 && r.unidades > 0 ? " · " : ""}
+                            {r.unidades > 0 ? `${r.unidades} und.` : ""}
+                          </span>
+                          {r.bs > 0 && (
+                            <span className="block text-xs text-muted-foreground">
+                              {r.bs.toFixed(2)} Bs
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <Separator />
 

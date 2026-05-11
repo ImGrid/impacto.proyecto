@@ -7,8 +7,11 @@ import { PrismaModule } from "./prisma";
 import { AuthModule, JwtAuthGuard, RolesGuard } from "./auth";
 import { AllExceptionsFilter } from "./common/filters";
 import { FcmModule } from "./common/services/fcm.module";
+import { DepartamentosModule } from "./departamentos";
+import { CiudadesModule } from "./ciudades";
+import { ExternosModule } from "./externos";
 import { ZonasModule } from "./zonas";
-import { AcopiadoresModule } from "./acopiadores";
+import { CentrosOperacionalesModule } from "./centros-operacionales";
 import { GeneradoresModule } from "./generadores";
 import { RecolectoresModule } from "./recolectores";
 import { AsociacionesModule } from "./asociaciones";
@@ -54,11 +57,14 @@ import { DashboardModule } from "./dashboard";
     AuthModule,
 
     // Módulos CRUD - Catálogos
+    DepartamentosModule,
+    CiudadesModule,
     ZonasModule,
     AsociacionesModule,
     MaterialesModule,
     TiposGeneradorModule,
     PreciosMaterialModule,
+    ExternosModule,
 
     // Módulos - Comunicación
     EventosModule,
@@ -66,7 +72,7 @@ import { DashboardModule } from "./dashboard";
 
     // Módulos CRUD - Usuarios
     AdministradoresModule,
-    AcopiadoresModule,
+    CentrosOperacionalesModule,
     GeneradoresModule,
     SucursalesModule,
     RecolectoresModule,

@@ -60,9 +60,13 @@ export class NotificacionesService {
 
   /**
    * Crear notificación. La lógica varía según el rol:
-   * - ADMIN: tipo GENERAL o SISTEMA (lógica original)
-   * - GENERADOR: tipo RESIDUOS_DISPONIBLES (necesita sucursal_id)
-   * - RECOLECTOR: tipo SOLICITUD_RECOJO (se envía a su acopiador)
+   * - ADMIN: tipo GENERAL (broadcast por zona) o SISTEMA (a receptores individuales).
+   * - GENERADOR: tipo RESIDUOS_DISPONIBLES (broadcast a recolectores de la zona
+   *   de la sucursal).
+   * - RECOLECTOR: tipo SOLICITUD_RECOJO (broadcast a TODOS los centros
+   *   operacionales activos del departamento del recolector). El vínculo
+   *   fijo recolector ↔ acopiador desapareció; cualquier centro del depto
+   *   puede tomar la solicitud.
    */
   async create(dto: CreateNotificacionDto, userId: number, userRol: rol_usuario) {
     if (userRol === 'GENERADOR') {
@@ -119,27 +123,56 @@ export class NotificacionesService {
   private async createFromRecolector(dto: CreateNotificacionDto, userId: number) {
     const recolector = await this.prisma.recolector.findFirst({
       where: { usuario_id: userId },
-      include: { acopiador: { select: { usuario_id: true } } },
+      select: { id: true, departamento_id: true, zona_id: true },
     });
     if (!recolector) throw new ForbiddenException('Recolector no encontrado');
 
-    const notificacion = await this.prisma.notificacion.create({
-      data: {
-        tipo: 'SOLICITUD_RECOJO',
-        emisor_id: userId,
-        receptor_id: recolector.acopiador.usuario_id,
-        zona_id: recolector.zona_id,
-        evento_id: null,
-        titulo: dto.titulo,
-        mensaje: dto.mensaje,
+    // Broadcast a TODOS los centros operacionales activos del depto del
+    // recolector. El vínculo fijo recolector ↔ acopiador desapareció;
+    // cualquier centro del depto puede recibir esta solicitud y atenderla.
+    const centrosDelDepto = await this.prisma.centro_operacional.findMany({
+      where: {
+        departamento_id: recolector.departamento_id,
+        activo: true,
       },
-      include: notificacionInclude,
+      select: { usuario_id: true },
     });
 
-    // Enviar push al acopiador
-    this.fcm.sendToUser(recolector.acopiador.usuario_id, dto.titulo, dto.mensaje ?? '');
+    if (centrosDelDepto.length === 0) {
+      throw new BadRequestException(
+        'No hay centros operacionales activos en tu departamento. Contacta al administrador.',
+      );
+    }
 
-    return mapNotificacion(notificacion);
+    // Una notificación por destinatario: permite tracking individual de
+    // lectura ("este centro la vio, este no") y respeta el patrón existente
+    // del admin con receptor_ids.
+    const notificaciones = await this.prisma.$transaction(
+      centrosDelDepto.map((centro) =>
+        this.prisma.notificacion.create({
+          data: {
+            tipo: 'SOLICITUD_RECOJO',
+            emisor_id: userId,
+            receptor_id: centro.usuario_id,
+            zona_id: recolector.zona_id,
+            evento_id: null,
+            titulo: dto.titulo,
+            mensaje: dto.mensaje,
+          },
+          include: notificacionInclude,
+        }),
+      ),
+    );
+
+    // Push a cada centro operacional.
+    for (const centro of centrosDelDepto) {
+      this.fcm.sendToUser(centro.usuario_id, dto.titulo, dto.mensaje ?? '');
+    }
+
+    // Devolver la primera notificación como representativa del envío. El
+    // contrato del endpoint sigue siendo "objeto único"; las copias
+    // adicionales son tracking interno por destinatario.
+    return mapNotificacion(notificaciones[0]);
   }
 
   private async createFromAdmin(dto: CreateNotificacionDto, userId: number) {
@@ -221,11 +254,16 @@ export class NotificacionesService {
 
   /**
    * Listar todas las notificaciones (para ADMIN en el panel web).
+   * Filtra por departamento activo del admin: las notificaciones tienen
+   * zona_id, la zona pertenece a una ciudad que pertenece a un depto.
    */
-  async findAll(query: NotificacionQueryDto) {
+  async findAll(query: NotificacionQueryDto, departamentoActivo: number | null) {
     const where: Prisma.notificacionWhereInput = {
       tipo: query.tipo ?? { not: 'EVENTO' },
       ...(query.zona_id ? { zona_id: query.zona_id } : {}),
+      ...(departamentoActivo != null
+        ? { zona: { ciudad: { departamento_id: departamentoActivo } } }
+        : {}),
       ...(query.search
         ? { titulo: { contains: query.search, mode: 'insensitive' as const } }
         : {}),

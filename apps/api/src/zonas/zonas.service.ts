@@ -4,17 +4,35 @@ import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
 import { CreateZonaDto, UpdateZonaDto, ZonaQueryDto } from './dto';
 
+const ciudadInclude = {
+  ciudad: {
+    select: {
+      id: true,
+      nombre: true,
+      departamento: { select: { id: true, nombre: true } },
+    },
+  },
+} satisfies Prisma.zonaInclude;
+
 @Injectable()
 export class ZonasService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateZonaDto) {
-    return this.prisma.zona.create({ data: dto });
+    await this.ensureCiudadExiste(dto.ciudad_id);
+    return this.prisma.zona.create({
+      data: dto,
+      include: ciudadInclude,
+    });
   }
 
   async findAll(query: ZonaQueryDto) {
     const where: Prisma.zonaWhereInput = {
       activo: query.activo,
+      ciudad_id: query.ciudad_id,
+      ...(query.departamento_id !== undefined
+        ? { ciudad: { departamento_id: query.departamento_id } }
+        : {}),
       ...(query.search
         ? { nombre: { contains: query.search, mode: 'insensitive' as const } }
         : {}),
@@ -26,6 +44,7 @@ export class ZonasService {
         skip: query.skip,
         take: query.limit,
         orderBy: { nombre: query.sortOrder },
+        include: ciudadInclude,
       }),
       this.prisma.zona.count({ where }),
     ]);
@@ -43,6 +62,13 @@ export class ZonasService {
         longitud: true,
         radio_km: true,
         activo: true,
+        ciudad: {
+          select: {
+            id: true,
+            nombre: true,
+            departamento: { select: { id: true, nombre: true } },
+          },
+        },
       },
       orderBy: { nombre: 'asc' },
     });
@@ -51,6 +77,7 @@ export class ZonasService {
   async findOne(id: number) {
     const zona = await this.prisma.zona.findUnique({
       where: { id },
+      include: ciudadInclude,
     });
     if (!zona) throw new NotFoundException('Zona no encontrada');
     return zona;
@@ -58,11 +85,28 @@ export class ZonasService {
 
   async update(id: number, dto: UpdateZonaDto) {
     await this.findOne(id);
-    return this.prisma.zona.update({ where: { id }, data: dto });
+    if (dto.ciudad_id !== undefined) {
+      await this.ensureCiudadExiste(dto.ciudad_id);
+    }
+    return this.prisma.zona.update({
+      where: { id },
+      data: dto,
+      include: ciudadInclude,
+    });
   }
 
   async hardDelete(id: number) {
     await this.findOne(id);
     await this.prisma.zona.delete({ where: { id } });
+  }
+
+  private async ensureCiudadExiste(ciudad_id: number) {
+    const ciudad = await this.prisma.ciudad.findUnique({
+      where: { id: ciudad_id },
+      select: { id: true },
+    });
+    if (!ciudad) {
+      throw new NotFoundException('Ciudad no encontrada');
+    }
   }
 }

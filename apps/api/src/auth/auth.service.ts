@@ -1,5 +1,7 @@
 import {
+  BadRequestException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -46,11 +48,69 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
-    // 4. Generar tokens y guardar refresh en BD
+    // 4. Resolver departamento activo según rol
+    const departamentoActivo = await this.resolveDepartamentoActivoEnLogin(
+      usuario.id,
+      usuario.rol,
+      dto.departamento_id,
+    );
+
+    // 5. Generar tokens y guardar refresh en BD
     const tokens = await this.generateTokens(
       usuario.id,
       usuario.identificador,
       usuario.rol,
+      departamentoActivo,
+    );
+    await this.saveRefreshToken(usuario.id, tokens.refresh_token, dispositivo);
+
+    return tokens;
+  }
+
+  /**
+   * Cambia el departamento activo de la sesión del admin.
+   * - Invalida TODAS las sesiones del usuario y emite un par nuevo.
+   * - Solo aplica a rol ADMIN (los demás roles tienen depto fijo).
+   */
+  async switchDepartamento(
+    userId: number,
+    departamentoId: number,
+    dispositivo?: string | null,
+  ) {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: userId },
+    });
+
+    if (!usuario || !usuario.activo) {
+      throw new ForbiddenException('Usuario no encontrado o desactivado');
+    }
+
+    if (usuario.rol !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Solo los administradores pueden cambiar de departamento',
+      );
+    }
+
+    const departamento = await this.prisma.departamento.findUnique({
+      where: { id: departamentoId },
+      select: { id: true, activo: true },
+    });
+
+    if (!departamento || !departamento.activo) {
+      throw new NotFoundException('Departamento no encontrado o inactivo');
+    }
+
+    // Rotación total: borrar todas las sesiones del admin y emitir un par nuevo.
+    // Así evitamos que tokens viejos con otro departamento sigan vivos.
+    await this.prisma.sesion_refresh.deleteMany({
+      where: { usuario_id: userId },
+    });
+
+    const tokens = await this.generateTokens(
+      usuario.id,
+      usuario.identificador,
+      usuario.rol,
+      departamento.id,
     );
     await this.saveRefreshToken(usuario.id, tokens.refresh_token, dispositivo);
 
@@ -74,7 +134,11 @@ export class AuthService {
   >();
   private readonly REFRESH_RACE_WINDOW_MS = 5_000;
 
-  async refreshTokens(userId: number, refreshToken: string) {
+  async refreshTokens(
+    userId: number,
+    refreshToken: string,
+    departamentoActivo: number | null,
+  ) {
     const tokenHash = this.hashToken(refreshToken);
     const cacheKey = `${userId}:${tokenHash}`;
 
@@ -85,7 +149,7 @@ export class AuthService {
       return cached.promise;
     }
 
-    const promise = this.doRefresh(userId, refreshToken);
+    const promise = this.doRefresh(userId, refreshToken, departamentoActivo);
     this.refreshCache.set(cacheKey, {
       promise,
       expiresAt: Date.now() + this.REFRESH_RACE_WINDOW_MS,
@@ -105,7 +169,11 @@ export class AuthService {
     return promise;
   }
 
-  private async doRefresh(userId: number, refreshToken: string) {
+  private async doRefresh(
+    userId: number,
+    refreshToken: string,
+    departamentoActivoDelToken: number | null,
+  ) {
     // 1. Buscar la sesión por hash del token
     const tokenHash = this.hashToken(refreshToken);
     const sesion = await this.prisma.sesion_refresh.findFirst({
@@ -135,13 +203,33 @@ export class AuthService {
       throw new ForbiddenException('Usuario no encontrado o desactivado');
     }
 
-    // 4. Rotación: borrar token viejo, generar nuevo par
+    // 4. Preservar el departamento activo del token original (no recalcular).
+    //    Si por algún motivo no viene (refresh muy viejo previo a la migración),
+    //    se recalcula según el rol; admin sin depto se fuerza a re-loguear.
+    const departamentoActivo =
+      departamentoActivoDelToken !== null
+        ? departamentoActivoDelToken
+        : await this.resolveDepartamentoActivoDelUsuario(
+            usuario.id,
+            usuario.rol,
+          );
+
+    if (usuario.rol === 'ADMIN' && departamentoActivo === null) {
+      // Admin sin depto en el token: fuerza a re-iniciar sesión para elegir uno.
+      await this.prisma.sesion_refresh.delete({ where: { id: sesion.id } });
+      throw new ForbiddenException(
+        'Sesión sin departamento activo. Vuelva a iniciar sesión.',
+      );
+    }
+
+    // 5. Rotación: borrar token viejo, generar nuevo par
     await this.prisma.sesion_refresh.delete({ where: { id: sesion.id } });
 
     const tokens = await this.generateTokens(
       usuario.id,
       usuario.identificador,
       usuario.rol,
+      departamentoActivo,
     );
     await this.saveRefreshToken(
       usuario.id,
@@ -177,8 +265,95 @@ export class AuthService {
 
   // --- Helpers privados ---
 
-  private async generateTokens(userId: number, identificador: string, rol: string) {
-    const payload: JwtPayload = { sub: userId, identificador, rol };
+  /**
+   * Resuelve el `departamento_activo` que va al JWT al hacer login,
+   * en función del rol del usuario y del input opcional del cliente.
+   *
+   * Reglas:
+   * - ADMIN: usa `dto.departamento_id`, obligatorio, debe existir y estar activo.
+   * - RECOLECTOR: usa el de su recolector (fijo en BD).
+   * - ACOPIADOR (centro operacional): usa el de su centro_operacional (fijo).
+   * - GENERADOR: null (entidad global; no aplica filtro de depto).
+   */
+  private async resolveDepartamentoActivoEnLogin(
+    userId: number,
+    rol: string,
+    departamentoIdInput: number | undefined,
+  ): Promise<number | null> {
+    if (rol === 'ADMIN') {
+      if (!departamentoIdInput) {
+        throw new BadRequestException(
+          'Debe seleccionar un departamento para iniciar sesión',
+        );
+      }
+      const departamento = await this.prisma.departamento.findUnique({
+        where: { id: departamentoIdInput },
+        select: { id: true, activo: true },
+      });
+      if (!departamento || !departamento.activo) {
+        throw new BadRequestException('Departamento no encontrado o inactivo');
+      }
+      return departamento.id;
+    }
+
+    return this.resolveDepartamentoActivoDelUsuario(userId, rol);
+  }
+
+  /**
+   * Lee el departamento del actor asociado al usuario (recolector,
+   * centro operacional). Para generador devuelve null.
+   * No aplica a ADMIN (el admin elige al loguearse).
+   */
+  private async resolveDepartamentoActivoDelUsuario(
+    userId: number,
+    rol: string,
+  ): Promise<number | null> {
+    if (rol === 'RECOLECTOR') {
+      const recolector = await this.prisma.recolector.findUnique({
+        where: { usuario_id: userId },
+        select: { departamento_id: true },
+      });
+      if (!recolector) {
+        throw new UnauthorizedException(
+          'Perfil de recolector no encontrado',
+        );
+      }
+      return recolector.departamento_id;
+    }
+
+    if (rol === 'ACOPIADOR') {
+      const centro = await this.prisma.centro_operacional.findUnique({
+        where: { usuario_id: userId },
+        select: { departamento_id: true },
+      });
+      if (!centro) {
+        throw new UnauthorizedException(
+          'Perfil de centro operacional no encontrado',
+        );
+      }
+      return centro.departamento_id;
+    }
+
+    if (rol === 'GENERADOR') {
+      return null;
+    }
+
+    // ADMIN no debería llegar aquí; se maneja en resolveDepartamentoActivoEnLogin.
+    return null;
+  }
+
+  private async generateTokens(
+    userId: number,
+    identificador: string,
+    rol: string,
+    departamento_activo: number | null,
+  ) {
+    const payload: JwtPayload = {
+      sub: userId,
+      identificador,
+      rol,
+      departamento_activo,
+    };
 
     // El refresh lleva un `jti` (JWT ID) único para que cada emisión sea
     // distinta incluso cuando dos refresh caen en el mismo segundo

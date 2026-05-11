@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
@@ -12,10 +16,8 @@ import {
 
 const recolectorInclude = {
   usuario: { select: { email: true, activo: true } },
-  acopiador: {
-    select: { id: true, nombre_completo: true, nombre_punto: true },
-  },
   zona: { select: { id: true, nombre: true } },
+  departamento: { select: { id: true, nombre: true } },
   asociacion: { select: { id: true, nombre: true } },
   recolector_dia_trabajo: { select: { dia_semana: true } },
   recolector_material: {
@@ -30,7 +32,22 @@ const recolectorInclude = {
 export class RecolectoresService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateRecolectorDto) {
+  async create(
+    dto: CreateRecolectorDto,
+    departamentoActivo: number | null,
+  ) {
+    // Filtro global por depto: si el caller tiene departamento_activo, el
+    // recolector creado debe estar en ese mismo departamento. Esto evita
+    // que un admin scoped a depto 2 cree recolectores en depto 1 por error.
+    if (
+      departamentoActivo != null &&
+      dto.departamento_id !== departamentoActivo
+    ) {
+      throw new BadRequestException(
+        'El recolector debe crearse en el departamento activo de la sesión',
+      );
+    }
+
     const password_hash = await argon2.hash(dto.password);
     const ciNormalizado = normalizarCI(dto.cedula_identidad);
 
@@ -50,8 +67,8 @@ export class RecolectoresService {
               direccion_domicilio: dto.direccion_domicilio,
               latitud: dto.latitud,
               longitud: dto.longitud,
-              acopiador_id: dto.acopiador_id,
               zona_id: dto.zona_id,
+              departamento_id: dto.departamento_id,
               asociacion_id: dto.asociacion_id,
               genero: dto.genero,
               edad: dto.edad,
@@ -107,14 +124,21 @@ export class RecolectoresService {
     });
   }
 
-  async findAll(query: RecolectorQueryDto) {
+  async findAll(
+    query: RecolectorQueryDto,
+    departamentoActivo: number | null,
+  ) {
     const where: Prisma.recolectorWhereInput = {
       activo: query.activo,
       zona_id: query.zona_id,
-      acopiador_id: query.acopiador_id,
       asociacion_id: query.asociacion_id,
       genero: query.genero,
       trabaja_individual: query.trabaja_individual,
+      // Filtro global por departamento activo. Solo se omite si llega null
+      // (caso defensivo; los roles que acceden aquí siempre tienen depto).
+      ...(departamentoActivo != null
+        ? { departamento_id: departamentoActivo }
+        : {}),
       ...(query.search
         ? { nombre_completo: { contains: query.search, mode: 'insensitive' as const } }
         : {}),
@@ -137,8 +161,13 @@ export class RecolectoresService {
     return new PaginatedResponseDto(data, total, query.page, query.limit);
   }
 
-  async findAllForMap() {
+  async findAllForMap(departamentoActivo: number | null) {
     return this.prisma.recolector.findMany({
+      where: {
+        ...(departamentoActivo != null
+          ? { departamento_id: departamentoActivo }
+          : {}),
+      },
       select: {
         id: true,
         nombre_completo: true,
@@ -146,25 +175,52 @@ export class RecolectoresService {
         latitud: true,
         longitud: true,
         activo: true,
-        acopiador: { select: { nombre_completo: true } },
         zona: { select: { nombre: true } },
+        departamento: { select: { nombre: true } },
       },
       orderBy: { nombre_completo: 'asc' },
     });
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, departamentoActivo: number | null) {
     const recolector = await this.prisma.recolector.findUnique({
       where: { id },
       include: recolectorInclude,
     });
 
     if (!recolector) throw new NotFoundException('Recolector no encontrado');
+
+    // Scope por departamento activo: si el recolector está en otro depto,
+    // desde la vista del caller no existe.
+    if (
+      departamentoActivo != null &&
+      recolector.departamento_id !== departamentoActivo
+    ) {
+      throw new NotFoundException('Recolector no encontrado');
+    }
+
     return recolector;
   }
 
-  async update(id: number, dto: UpdateRecolectorDto) {
-    const recolector = await this.findOne(id);
+  async update(
+    id: number,
+    dto: UpdateRecolectorDto,
+    departamentoActivo: number | null,
+  ) {
+    // findOne aplica el scope por depto. Si el recolector está en otro
+    // departamento, lanza 404 antes de tocar BD.
+    const recolector = await this.findOne(id, departamentoActivo);
+
+    // Si el dto intenta cambiar el depto, debe coincidir con el activo.
+    if (
+      departamentoActivo != null &&
+      dto.departamento_id !== undefined &&
+      dto.departamento_id !== departamentoActivo
+    ) {
+      throw new BadRequestException(
+        'No se puede mover el recolector a otro departamento desde esta sesión',
+      );
+    }
 
     return this.prisma.$transaction(async (tx) => {
       // Extract relation arrays and activo from dto
@@ -245,8 +301,8 @@ export class RecolectoresService {
     });
   }
 
-  async hardDelete(id: number) {
-    const recolector = await this.findOne(id);
+  async hardDelete(id: number, departamentoActivo: number | null) {
+    const recolector = await this.findOne(id, departamentoActivo);
     await this.prisma.usuario.delete({
       where: { id: recolector.usuario_id },
     });

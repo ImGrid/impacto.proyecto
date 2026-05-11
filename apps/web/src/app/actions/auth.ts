@@ -34,12 +34,29 @@ export async function login(
   const password = formData.get("password") as string;
   const callbackUrl = (formData.get("callbackUrl") as string) || "/";
 
+  // Departamento activo: obligatorio para que el admin pueda iniciar sesión.
+  // El backend rechaza el login de admin sin departamento_id. Verificamos
+  // también aquí para dar un mensaje claro antes de salir a la red.
+  const departamentoIdRaw = formData.get("departamento_id");
+  const departamentoId =
+    typeof departamentoIdRaw === "string" && departamentoIdRaw.length > 0
+      ? Number(departamentoIdRaw)
+      : null;
+
+  if (departamentoId === null || Number.isNaN(departamentoId)) {
+    return { error: "Seleccione un departamento para iniciar sesión." };
+  }
+
   try {
     // Llamar al backend NestJS
     const response = await fetch(`${API_URL}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identificador, password }),
+      body: JSON.stringify({
+        identificador,
+        password,
+        departamento_id: departamentoId,
+      }),
     });
 
     if (!response.ok) {
@@ -79,6 +96,75 @@ export async function login(
 
   // redirect() lanza una excepción internamente, debe ir fuera del try/catch
   redirect(callbackUrl);
+}
+
+export type SwitchDepartamentoResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Cambia el departamento activo de la sesión del admin.
+ *
+ * Llama al endpoint `/auth/switch-departamento` del backend con el
+ * access_token actual. El backend invalida TODAS las sesiones del usuario
+ * y emite un par nuevo de tokens con el nuevo `departamento_activo`.
+ * Rota las cookies httpOnly con los nuevos tokens.
+ */
+export async function switchDepartamento(
+  departamentoId: number,
+): Promise<SwitchDepartamentoResult> {
+  if (!Number.isFinite(departamentoId) || departamentoId <= 0) {
+    return { ok: false, error: "Departamento inválido." };
+  }
+
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get("access_token")?.value;
+
+  if (!accessToken) {
+    return { ok: false, error: "Su sesión expiró. Vuelva a iniciar sesión." };
+  }
+
+  let data: { access_token: string; refresh_token: string };
+  try {
+    const response = await fetch(`${API_URL}/auth/switch-departamento`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ departamento_id: departamentoId }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      const message =
+        errorData?.message || "No se pudo cambiar el departamento.";
+      return {
+        ok: false,
+        error: Array.isArray(message) ? message[0] : message,
+      };
+    }
+
+    data = await response.json();
+  } catch {
+    return {
+      ok: false,
+      error: "No se pudo conectar con el servidor. Intente más tarde.",
+    };
+  }
+
+  // Rotar cookies con los nuevos tokens. El backend ya invalidó las
+  // sesiones anteriores, así que los tokens viejos quedan inservibles.
+  cookieStore.set("access_token", data.access_token, {
+    ...cookieOptions,
+    maxAge: ACCESS_COOKIE_MAX_AGE,
+  });
+  cookieStore.set("refresh_token", data.refresh_token, {
+    ...cookieOptions,
+    maxAge: REFRESH_COOKIE_MAX_AGE,
+  });
+
+  return { ok: true };
 }
 
 export async function logout() {

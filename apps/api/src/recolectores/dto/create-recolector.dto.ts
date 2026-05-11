@@ -78,11 +78,11 @@ export class CreateRecolectorDto {
 
   @IsInt()
   @Type(() => Number)
-  acopiador_id: number;
+  zona_id: number;
 
   @IsInt()
   @Type(() => Number)
-  zona_id: number;
+  departamento_id: number;
 
   @IsOptional()
   @IsInt()

@@ -34,8 +34,11 @@ export class NotificacionesController {
 
   @Get()
   @Roles(rol_usuario.ADMIN)
-  findAll(@Query() query: NotificacionQueryDto) {
-    return this.notificacionesService.findAll(query);
+  findAll(
+    @Query() query: NotificacionQueryDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.notificacionesService.findAll(query, departamentoActivo);
   }
 
   @Get('mias')

@@ -69,10 +69,14 @@ export class EventosService {
     });
   }
 
-  async findAll(query: EventoQueryDto) {
+  async findAll(query: EventoQueryDto, departamentoActivo: number | null) {
     const where: Prisma.eventoWhereInput = {
       activo: query.activo,
       ...(query.zona_id ? { zona_id: query.zona_id } : {}),
+      // Filtro global por depto activo (vía zona -> ciudad -> departamento).
+      ...(departamentoActivo != null
+        ? { zona: { ciudad: { departamento_id: departamentoActivo } } }
+        : {}),
       ...(query.search
         ? { titulo: { contains: query.search, mode: 'insensitive' as const } }
         : {}),
@@ -95,20 +99,31 @@ export class EventosService {
     return new PaginatedResponseDto(data, total, query.page, query.limit);
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, departamentoActivo: number | null) {
     const evento = await this.prisma.evento.findUnique({
       where: { id },
       include: {
-        zona: { select: { id: true, nombre: true } },
+        zona: {
+          select: { id: true, nombre: true, ciudad: { select: { departamento_id: true } } },
+        },
         administrador: { select: { id: true, nombre_completo: true } },
       },
     });
     if (!evento) throw new NotFoundException('Evento no encontrado');
+
+    // Filtro global: el evento debe pertenecer al depto activo (vía zona).
+    if (
+      departamentoActivo != null &&
+      evento.zona.ciudad.departamento_id !== departamentoActivo
+    ) {
+      throw new NotFoundException('Evento no encontrado');
+    }
+
     return evento;
   }
 
-  async update(id: number, dto: UpdateEventoDto) {
-    await this.findOne(id);
+  async update(id: number, dto: UpdateEventoDto, departamentoActivo: number | null) {
+    await this.findOne(id, departamentoActivo);
 
     const data: Prisma.eventoUpdateInput = {};
     if (dto.titulo !== undefined) data.titulo = dto.titulo;
@@ -131,8 +146,8 @@ export class EventosService {
     });
   }
 
-  async hardDelete(id: number) {
-    await this.findOne(id);
+  async hardDelete(id: number, departamentoActivo: number | null) {
+    await this.findOne(id, departamentoActivo);
 
     // Eliminar notificaciones asociadas al evento primero, luego el evento
     await this.prisma.$transaction(async (tx) => {

@@ -33,10 +33,6 @@ export class TransaccionesController {
   constructor(private readonly transaccionesService: TransaccionesService) {}
 
   // Rate limit estricto en escritura: 20 transacciones/minuto por IP.
-  // Un acopiador real registra 5–15 transacciones/hora en ráfagas
-  // legítimas (cuando llegan varios recolectores juntos). 20/min es
-  // holgado para uso normal y corta intentos de enumeración o creación
-  // automatizada de fraude.
   @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Post()
   @Roles(
@@ -58,8 +54,9 @@ export class TransaccionesController {
     @Query() query: TransaccionQueryDto,
     @CurrentUser('userId') userId: number,
     @CurrentUser('rol') rol: rol_usuario,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.transaccionesService.findAll(query, userId, rol);
+    return this.transaccionesService.findAll(query, userId, rol, departamentoActivo);
   }
 
   @Get('pendientes')
@@ -83,8 +80,9 @@ export class TransaccionesController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser('userId') userId: number,
     @CurrentUser('rol') rol: rol_usuario,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.transaccionesService.findOne(id, userId, rol);
+    return this.transaccionesService.findOne(id, userId, rol, departamentoActivo);
   }
 
   @Patch(':id')
@@ -104,14 +102,18 @@ export class TransaccionesController {
   editAdmin(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: EditTransaccionAdminDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.transaccionesService.editAdmin(id, dto);
+    return this.transaccionesService.editAdmin(id, dto, departamentoActivo);
   }
 
   @Delete(':id')
   @Roles(rol_usuario.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.transaccionesService.remove(id);
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.transaccionesService.remove(id, departamentoActivo);
   }
 }

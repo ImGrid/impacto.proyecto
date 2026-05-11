@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsInt,
   IsOptional,
@@ -18,11 +19,16 @@ import { DetalleTransaccionDto } from './create-transaccion.dto';
  * Reglas importantes:
  * - Si la entrega está PAGADA (tiene pago vinculado), solo se puede
  *   editar `observaciones`. El service rechaza los demás campos con 400.
- * - Cambiar `recolector_id` implica que el nuevo recolector pertenezca
- *   al mismo acopiador actual de la entrega (regla del cliente). El
- *   service valida esto.
- * - `sucursal_id: null` significa "quitar la sucursal" (borra el paso
- *   GENERADO automático del historial).
+ * - Cambiar `recolector_id` debe respetar coherencia de departamento
+ *   con el destino actual (si el destino es un centro operacional, ambos
+ *   deben estar en el mismo departamento).
+ * - La sucursal de origen se gestiona por línea de detalle (cada
+ *   `detalle.sucursal_id` puede venir o no). Reemplazar `detalles`
+ *   redefine las sucursales completas. Si no se envían detalles, las
+ *   sucursales actuales se preservan.
+ * - Los 3 campos de destino son nullable explícitamente: `null` = limpiar
+ *   ese campo, `undefined` = no tocar, valor = asignar. Máximo 1 marcado
+ *   a la vez (validado por el service y por CHECK en BD).
  */
 export class EditTransaccionAdminDto {
   @IsOptional()
@@ -49,12 +55,23 @@ export class EditTransaccionAdminDto {
   @Type(() => Number)
   recolector_id?: number;
 
-  // Nullable explícito: si viene `null` se elimina la sucursal; si viene
-  // un entero se asigna; si no se envía, se mantiene como estaba.
+  // -------- Destino polimórfico --------
+  // Cualquier combinación con máximo 1 marcado. `null` = limpiar el campo
+  // específico. `undefined` = no tocar.
+
   @IsOptional()
   @IsInt()
   @Type(() => Number)
-  sucursal_id?: number | null;
+  centro_operacional_id?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  acopiador_externo_id?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  destino_desconocido?: boolean;
 
   @IsOptional()
   @IsArray()

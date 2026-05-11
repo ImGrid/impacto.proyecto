@@ -7,29 +7,42 @@ import {
 import { Prisma, estado_transaccion, rol_usuario } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
-import { ensureRecolectorPerteneceAlAcopiador } from '../common/auth';
+import { ensureMismoDepartamento } from '../common/auth';
 import {
   CreateTransaccionDto,
+  DetalleTransaccionDto,
   UpdateTransaccionDto,
   EditTransaccionAdminDto,
   TransaccionQueryDto,
 } from './dto';
 
-// Relaciones que siempre se cargan al consultar transacciones
+// Relaciones que siempre se cargan al consultar transacciones.
+//
+// Con el cambio definitivo (cambio 2.6) la sucursal vive a NIVEL DE LÍNEA
+// (`detalle_transaccion.sucursal_id`), no a nivel de cabecera. Esto permite
+// que una sola entrega del recolector consolide material proveniente de
+// varias sucursales distintas.
 const transaccionInclude = {
-  recolector: { select: { id: true, nombre_completo: true, cedula_identidad: true } },
-  acopiador: { select: { id: true, nombre_completo: true, nombre_punto: true } },
-  sucursal: {
-    select: {
-      id: true,
-      nombre: true,
-      generador: { select: { id: true, razon_social: true } },
-    },
+  recolector: {
+    select: { id: true, nombre_completo: true, cedula_identidad: true },
+  },
+  centro_operacional: {
+    select: { id: true, nombre_completo: true, nombre_punto: true },
+  },
+  acopiador_comprador_externo: {
+    select: { id: true, nombre: true, asociacion: true },
   },
   zona: { select: { id: true, nombre: true } },
   detalle_transaccion: {
     include: {
       material: { select: { id: true, nombre: true, unidad_medida_default: true } },
+      sucursal: {
+        select: {
+          id: true,
+          nombre: true,
+          generador: { select: { id: true, razon_social: true } },
+        },
+      },
     },
   },
   transaccion_historial: {
@@ -46,14 +59,35 @@ const transaccionInclude = {
 } satisfies Prisma.transaccionInclude;
 
 // Transiciones de estado válidas.
-// El flujo real es GENERADO → RECOLECTADO → ENTREGADO → PAGADO. El acopiador
-// nunca va directo a la sucursal del generador, por lo que GENERADO→ENTREGADO
-// no es un escenario válido y se elimina para evitar transacciones sin
-// recolector.
+// El flujo real es GENERADO → RECOLECTADO → ENTREGADO → PAGADO.
 const TRANSICIONES_VALIDAS: Record<string, estado_transaccion[]> = {
   GENERADO: ['RECOLECTADO'],
   RECOLECTADO: ['ENTREGADO'],
   ENTREGADO: ['PAGADO'],
+};
+
+// Snapshot de materiales que se guarda en `transaccion_historial.detalles`.
+// Incluye sucursal_id para que el detalle del historial preserve el origen
+// aunque después se editen los detalles.
+type MaterialSnapshot = {
+  material_id: number;
+  cantidad: number;
+  unidad_medida: string;
+  precio_unitario: number | undefined;
+  sucursal_id?: number;
+};
+
+type HistorialCreate = {
+  estado: estado_transaccion;
+  actor_id: number;
+  rol_actor: rol_usuario;
+  observaciones: string | undefined;
+  detalles:
+    | {
+        materiales: MaterialSnapshot[];
+        sucursal_id?: number;
+      }
+    | undefined;
 };
 
 @Injectable()
@@ -61,10 +95,23 @@ export class TransaccionesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Crear transacción. El estado se determina por el rol del creador:
-   * - GENERADOR → GENERADO (recolector_id y acopiador_id quedan null)
-   * - RECOLECTOR → RECOLECTADO (acopiador_id se hereda de su asignación)
-   * - ACOPIADOR → ENTREGADO (transacción completa en un paso)
+   * Crear transacción. El estado y el destino se determinan por el rol del
+   * creador. Con el cambio 2.6 la sucursal vive POR LÍNEA de detalle
+   * (`detalle.sucursal_id`), no en la cabecera.
+   *
+   * - GENERADOR → GENERADO. Sin destino. Sin recolector. Los detalles que
+   *   envía nacen con su sucursal (autocompletada si tiene una sola, o
+   *   exigida explícitamente si tiene varias).
+   * - RECOLECTOR → RECOLECTADO. Destino OPCIONAL. Los detalles pueden traer
+   *   `sucursal_id` opcional por línea; si lo traen, deben ser del mismo
+   *   depto del recolector.
+   * - ACOPIADOR (centro operacional) → ENTREGADO. Destino auto = él mismo.
+   *   Detalles con `sucursal_id` opcional, validados same-depto con el
+   *   recolector indicado.
+   * - ADMIN → estado explícito (RECOLECTADO o ENTREGADO):
+   *     • RECOLECTADO: el admin registra que se recolectó. Destino siempre vacío.
+   *     • ENTREGADO: el admin registra una entrega. Destino libre.
+   *   En ambos casos los detalles pueden traer `sucursal_id` opcional.
    */
   async create(
     dto: CreateTransaccionDto,
@@ -74,41 +121,76 @@ export class TransaccionesService {
     return this.prisma.$transaction(async (tx) => {
       let estado: estado_transaccion;
       let recolectorId: number | null = null;
-      let acopiadorId: number | null = null;
       let zonaId: number;
-      // Cuando el creador es ADMIN, el historial NO debe registrar al
-      // admin como actor de los pasos — el admin solo registra en
-      // nombre del recolector/acopiador reales. Guardamos sus usuario_id
-      // aquí para construir el historial más abajo.
+
+      // Destino polimórfico de la transacción. Máximo 1 marcado.
+      let centroOperacionalId: number | null = null;
+      let acopiadorExternoId: number | null = null;
+      let destinoDesconocido = false;
+
+      // Cuando el creador es ADMIN, el historial registra los pasos del
+      // recolector y centro operacional reales como actores (no al admin),
+      // siempre que esos actores existan.
       let adminRecolectorUsuarioId: number | null = null;
-      let adminAcopiadorUsuarioId: number | null = null;
-      // Cuando la transacción tiene sucursal y el creador NO es el
-      // propio generador, insertamos un paso GENERADO al inicio del
-      // historial con el dueño de la sucursal como actor. Eso refleja
-      // que el origen existió (aunque el generador no haya avisado
-      // explícitamente por la app).
-      let generadorAutoUsuarioId: number | null = null;
+      let adminCentroOpUsuarioId: number | null = null;
 
       if (userRol === 'GENERADOR') {
         estado = 'GENERADO';
 
-        // El generador debe indicar sucursal
-        if (!dto.sucursal_id) {
-          throw new BadRequestException('La sucursal es obligatoria para el generador');
-        }
-
-        // Obtener zona de la sucursal y verificar que pertenece al generador
         const generador = await tx.generador.findFirst({
           where: { usuario_id: userId },
+          include: { sucursal: { select: { id: true, zona_id: true } } },
         });
         if (!generador) throw new ForbiddenException('Generador no encontrado');
 
-        const sucursal = await tx.sucursal.findFirst({
-          where: { id: dto.sucursal_id, generador_id: generador.id },
-        });
-        if (!sucursal) throw new BadRequestException('La sucursal no pertenece a este generador');
+        // El generador siempre crea un aviso de UNA sola sucursal: todas
+        // las líneas que envía deben tener la misma `sucursal_id` (o
+        // ninguna, en cuyo caso autocompletamos si tiene una sola sucursal).
+        const sucursalIdsValidas = new Set(generador.sucursal.map((s) => s.id));
+        let sucursalDelAviso: number | null = null;
 
-        zonaId = sucursal.zona_id;
+        for (const d of dto.detalles) {
+          if (d.sucursal_id != null) {
+            if (!sucursalIdsValidas.has(d.sucursal_id)) {
+              throw new BadRequestException(
+                'La sucursal indicada no le pertenece',
+              );
+            }
+            if (sucursalDelAviso == null) {
+              sucursalDelAviso = d.sucursal_id;
+            } else if (sucursalDelAviso !== d.sucursal_id) {
+              throw new BadRequestException(
+                'Un aviso solo puede ser de una sucursal a la vez. Cree un aviso por cada sucursal.',
+              );
+            }
+          }
+        }
+
+        // Si no vino sucursal explícita en ningún detalle, autocompletar
+        // si el generador tiene una sola sucursal.
+        if (sucursalDelAviso == null) {
+          if (generador.sucursal.length === 0) {
+            throw new BadRequestException(
+              'No tiene sucursales registradas para crear avisos',
+            );
+          }
+          if (generador.sucursal.length > 1) {
+            throw new BadRequestException(
+              'Indique a qué sucursal corresponde el aviso',
+            );
+          }
+          sucursalDelAviso = generador.sucursal[0].id;
+          // Autocompletar todos los detalles.
+          for (const d of dto.detalles) {
+            d.sucursal_id = sucursalDelAviso;
+          }
+        }
+
+        const sucursalUsada = generador.sucursal.find(
+          (s) => s.id === sucursalDelAviso,
+        )!;
+        zonaId = sucursalUsada.zona_id;
+        // GENERADO no lleva destino — siempre los 3 campos vacíos.
 
       } else if (userRol === 'RECOLECTOR') {
         estado = 'RECOLECTADO';
@@ -119,41 +201,53 @@ export class TransaccionesService {
         if (!recolector) throw new ForbiddenException('Recolector no encontrado');
 
         recolectorId = recolector.id;
-        acopiadorId = recolector.acopiador_id;
         zonaId = dto.zona_id ?? recolector.zona_id;
+
+        this.validarUnicidadDestino(
+          dto.centro_operacional_id,
+          dto.acopiador_externo_id,
+          dto.destino_desconocido,
+        );
+
+        if (dto.centro_operacional_id != null) {
+          await ensureMismoDepartamento(
+            tx,
+            recolector.id,
+            dto.centro_operacional_id,
+          );
+          centroOperacionalId = dto.centro_operacional_id;
+        } else if (dto.acopiador_externo_id != null) {
+          await this.verificarExternoActivo(tx, dto.acopiador_externo_id);
+          acopiadorExternoId = dto.acopiador_externo_id;
+        } else if (dto.destino_desconocido === true) {
+          destinoDesconocido = true;
+        }
+
+        await this.validarSucursalesDeDetalles(tx, dto.detalles, recolector.id);
 
       } else if (userRol === 'ACOPIADOR') {
         estado = 'ENTREGADO';
 
-        const acopiador = await tx.acopiador.findFirst({
+        const centro = await tx.centro_operacional.findFirst({
           where: { usuario_id: userId },
         });
-        if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
-
-        if (!dto.recolector_id) {
-          throw new BadRequestException('El recolector es obligatorio para el acopiador');
+        if (!centro) {
+          throw new ForbiddenException('Centro operacional no encontrado');
         }
 
-        // Verificar que el recolector existe Y pertenece a este acopiador.
-        // Cierra el IDOR (BOLA) por el que un acopiador podía registrar
-        // entregas a recolectores ajenos. El check va dentro de la
-        // transacción para evitar TOCTOU.
-        await ensureRecolectorPerteneceAlAcopiador(
-          tx,
-          dto.recolector_id,
-          acopiador.id,
-        );
+        if (!dto.recolector_id) {
+          throw new BadRequestException('El recolector es obligatorio');
+        }
+
+        await ensureMismoDepartamento(tx, dto.recolector_id, centro.id);
 
         recolectorId = dto.recolector_id;
-        acopiadorId = acopiador.id;
-        zonaId = dto.zona_id ?? acopiador.zona_id;
+        centroOperacionalId = centro.id;
+        zonaId = dto.zona_id ?? centro.zona_id;
+
+        await this.validarSucursalesDeDetalles(tx, dto.detalles, recolectorId);
 
       } else if (userRol === 'ADMIN') {
-        // El admin solo registra dos tipos de entregas:
-        //   - RECOLECTADO: el recolector ya recogió pero aún no entregó.
-        //   - ENTREGADO:   flujo completo recolector → acopiador (sin pago).
-        // El caso GENERADO lo hace el generador desde el móvil, no el admin.
-        // PAGADO se alcanza solo registrando un pago.
         if (!dto.estado) {
           throw new BadRequestException(
             'Debe indicar en qué estado se creará la entrega',
@@ -177,70 +271,60 @@ export class TransaccionesService {
           );
         }
 
-        // El recolector siempre pertenece a un acopiador fijo — no se
-        // acepta override. Si el admin envía un acopiador_id distinto,
-        // lo rechazamos explícitamente para evitar romper la regla.
-        // Incluimos el acopiador y los usuarios de ambos en un solo query
-        // para luego construir el historial con los actores reales (no
-        // el admin) — el admin queda registrado en creado_por_id.
         const recolector = await tx.recolector.findUnique({
           where: { id: dto.recolector_id },
-          include: { acopiador: true },
         });
         if (!recolector) {
           throw new BadRequestException('Recolector no encontrado');
         }
 
-        if (
-          dto.acopiador_id != null &&
-          dto.acopiador_id !== recolector.acopiador_id
-        ) {
-          throw new BadRequestException(
-            'El recolector seleccionado pertenece a otro acopiador. No se puede cambiar manualmente.',
-          );
-        }
-
         recolectorId = recolector.id;
-        acopiadorId = recolector.acopiador_id;
         zonaId = dto.zona_id ?? recolector.zona_id;
-
-        // Usuarios reales para el historial (más abajo).
         adminRecolectorUsuarioId = recolector.usuario_id;
-        adminAcopiadorUsuarioId = recolector.acopiador.usuario_id;
 
-        // Si manda zona_id distinta a la del recolector, se rechaza:
-        // el recolector trabaja solo en su zona asignada.
         if (dto.zona_id != null && dto.zona_id !== recolector.zona_id) {
           throw new BadRequestException(
             'La zona no coincide con la zona del recolector seleccionado',
           );
         }
 
+        await this.validarSucursalesDeDetalles(tx, dto.detalles, recolector.id);
+
+        if (estado === 'ENTREGADO') {
+          this.validarUnicidadDestino(
+            dto.centro_operacional_id,
+            dto.acopiador_externo_id,
+            dto.destino_desconocido,
+          );
+
+          if (dto.centro_operacional_id != null) {
+            await ensureMismoDepartamento(
+              tx,
+              recolector.id,
+              dto.centro_operacional_id,
+            );
+            centroOperacionalId = dto.centro_operacional_id;
+            const centro = await tx.centro_operacional.findUnique({
+              where: { id: dto.centro_operacional_id },
+              select: { usuario_id: true },
+            });
+            adminCentroOpUsuarioId = centro?.usuario_id ?? null;
+          } else if (dto.acopiador_externo_id != null) {
+            await this.verificarExternoActivo(tx, dto.acopiador_externo_id);
+            acopiadorExternoId = dto.acopiador_externo_id;
+          } else if (dto.destino_desconocido === true) {
+            destinoDesconocido = true;
+          }
+        }
+
       } else {
         throw new ForbiddenException('Su rol no puede crear entregas');
-      }
-
-      // Paso GENERADO automático: si hay sucursal y el creador no es el
-      // propio generador (que ya crea su paso GENERADO natural), cargamos
-      // al generador dueño de la sucursal para insertar un paso GENERADO
-      // al inicio del historial. Esto refleja en el recorrido que hubo un
-      // origen identificable aunque el generador no haya usado la app.
-      if (dto.sucursal_id != null && userRol !== 'GENERADOR') {
-        const sucursalConGenerador = await tx.sucursal.findUnique({
-          where: { id: dto.sucursal_id },
-          include: { generador: { select: { usuario_id: true } } },
-        });
-        if (!sucursalConGenerador) {
-          throw new BadRequestException('Sucursal no encontrada');
-        }
-        generadorAutoUsuarioId = sucursalConGenerador.generador.usuario_id;
       }
 
       // Validación de cantidad por rol. El GENERADOR puede registrar
       // materiales sin pesar (solo avisa qué tipo de residuo tiene); el
       // recolector que lo recoja medirá con su balanza y el acopiador
-      // verificará el peso final. El resto de roles SÍ debe especificar
-      // una cantidad mayor a 0 al crear.
+      // verificará el peso final.
       if (userRol !== 'GENERADOR') {
         for (const d of dto.detalles) {
           if (d.cantidad == null || d.cantidad <= 0) {
@@ -251,18 +335,20 @@ export class TransaccionesService {
         }
       }
 
-      // Calcular subtotales y monto total. Si el generador no especificó
-      // cantidad, queda en 0 (placeholder); el subtotal y monto_total
-      // serán 0 hasta que el acopiador verifique con peso real.
+      // Calcular subtotales y monto total.
       const detallesConSubtotal = dto.detalles.map((d) => ({
         material_id: d.material_id,
         cantidad: d.cantidad ?? 0,
         unidad_medida: d.unidad_medida,
         precio_unitario: d.precio_unitario ?? 0,
         subtotal: (d.cantidad ?? 0) * (d.precio_unitario ?? 0),
+        sucursal_id: d.sucursal_id ?? null,
       }));
 
-      const montoTotal = detallesConSubtotal.reduce((sum, d) => sum + d.subtotal, 0);
+      const montoTotal = detallesConSubtotal.reduce(
+        (sum, d) => sum + d.subtotal,
+        0,
+      );
 
       const now = new Date();
       let fecha: Date = now;
@@ -289,41 +375,28 @@ export class TransaccionesService {
         }
       }
 
-      // Snapshot de los materiales para guardar en el JSONB del historial.
-      const materialesSnapshot = dto.detalles.map((d) => ({
+      // Snapshots para el historial.
+      const materialesSnapshot: MaterialSnapshot[] = dto.detalles.map((d) => ({
         material_id: d.material_id,
         cantidad: d.cantidad ?? 0,
         unidad_medida: d.unidad_medida,
         precio_unitario: d.precio_unitario,
+        ...(d.sucursal_id != null ? { sucursal_id: d.sucursal_id } : {}),
       }));
 
-      // Construir el historial según rol y estado.
-      //
-      //   - GENERADOR/RECOLECTOR/ACOPIADOR: un único paso, actor = usuario
-      //     autenticado. El admin NO entra aquí.
-      //   - ADMIN + RECOLECTADO: un paso RECOLECTADO con actor = recolector.
-      //   - ADMIN + ENTREGADO: DOS pasos (RECOLECTADO por recolector,
-      //     ENTREGADO por acopiador) para reflejar el flujo completo en
-      //     el recorrido como si cada uno hubiera actuado. El admin queda
-      //     registrado en `creado_por_id` para auditoría.
-      type HistorialCreate = {
-        estado: estado_transaccion;
-        actor_id: number;
-        rol_actor: rol_usuario;
-        observaciones: string | undefined;
-        detalles: { materiales: typeof materialesSnapshot } | undefined;
-      };
+      // Snapshot sin precios para pasos anteriores al ENTREGADO.
+      const snapshotSinPrecio: MaterialSnapshot[] = materialesSnapshot.map(
+        (m) => ({
+          material_id: m.material_id,
+          cantidad: m.cantidad,
+          unidad_medida: m.unidad_medida,
+          precio_unitario: undefined,
+          ...(m.sucursal_id != null ? { sucursal_id: m.sucursal_id } : {}),
+        }),
+      );
+
+      // Construir el historial.
       let historialRows: HistorialCreate[];
-
-      // Snapshot sin precios para los pasos anteriores al ENTREGADO: en el
-      // paso GENERADO o RECOLECTADO todavía no se conoce el precio final;
-      // ese lo pone el acopiador al entregar.
-      const snapshotSinPrecio = materialesSnapshot.map((m) => ({
-        material_id: m.material_id,
-        cantidad: m.cantidad,
-        unidad_medida: m.unidad_medida,
-        precio_unitario: undefined,
-      }));
 
       if (userRol === 'ADMIN') {
         if (estado === 'RECOLECTADO') {
@@ -337,7 +410,10 @@ export class TransaccionesService {
             },
           ];
         } else {
-          // ENTREGADO: dos filas — RECOLECTADO (recolector) + ENTREGADO (acopiador).
+          // ENTREGADO: dos filas — RECOLECTADO (recolector) + ENTREGADO (variable).
+          const entregadoActorId = adminCentroOpUsuarioId ?? userId;
+          const entregadoRolActor: rol_usuario =
+            adminCentroOpUsuarioId != null ? 'ACOPIADOR' : 'ADMIN';
           historialRows = [
             {
               estado: 'RECOLECTADO',
@@ -348,8 +424,8 @@ export class TransaccionesService {
             },
             {
               estado: 'ENTREGADO',
-              actor_id: adminAcopiadorUsuarioId!,
-              rol_actor: 'ACOPIADOR',
+              actor_id: entregadoActorId,
+              rol_actor: entregadoRolActor,
               observaciones: dto.observaciones,
               detalles: { materiales: materialesSnapshot },
             },
@@ -367,26 +443,31 @@ export class TransaccionesService {
         ];
       }
 
-      // Insertar paso GENERADO automático al inicio del historial si hay
-      // sucursal y el rol creador no es GENERADOR (que ya lo crea natural).
-      if (generadorAutoUsuarioId != null) {
-        historialRows.unshift({
-          estado: 'GENERADO',
-          actor_id: generadorAutoUsuarioId,
-          rol_actor: 'GENERADOR',
-          observaciones: undefined,
-          detalles: { materiales: snapshotSinPrecio },
-        });
+      // Pasos GENERADO automáticos: uno por cada sucursal distinta presente
+      // en los detalles, con el generador dueño como actor. Refleja en el
+      // historial que el material tuvo un origen identificable aunque el
+      // generador no haya avisado por la app.
+      //
+      // Para el rol GENERADOR este bloque se omite porque su paso GENERADO
+      // natural (insertado arriba) ya cubre el origen real (un solo aviso
+      // por sucursal).
+      if (userRol !== 'GENERADOR') {
+        const pasosGeneradoAuto = await this.buildPasosGeneradoAuto(
+          tx,
+          dto.detalles,
+        );
+        // Los insertamos al inicio del historial.
+        historialRows = [...pasosGeneradoAuto, ...historialRows];
       }
 
-      // Crear transacción + detalles + historial en una sola operación
       const transaccion = await tx.transaccion.create({
         data: {
           fecha,
           hora,
           recolector_id: recolectorId,
-          acopiador_id: acopiadorId,
-          sucursal_id: dto.sucursal_id,
+          centro_operacional_id: centroOperacionalId,
+          acopiador_externo_id: acopiadorExternoId,
+          destino_desconocido: destinoDesconocido,
           zona_id: zonaId,
           monto_total: montoTotal,
           observaciones: dto.observaciones,
@@ -407,7 +488,7 @@ export class TransaccionesService {
   }
 
   /**
-   * Actualizar transacción (avanzar estado).
+   * Avanzar el estado de una transacción.
    * Valida transiciones permitidas y permisos por rol.
    */
   async update(
@@ -422,18 +503,27 @@ export class TransaccionesService {
 
     if (!transaccion) throw new NotFoundException('Entrega no encontrada');
 
-    // Object-level authorization (OWASP API1:2023 BOLA): validar que el usuario
-    // sea dueño del recurso antes de operar sobre él. No basta con el rol.
+    // Object-level authorization (OWASP API1:2023 BOLA).
     if (userRol === 'ACOPIADOR') {
-      const acopiador = await this.prisma.acopiador.findFirst({
+      const centro = await this.prisma.centro_operacional.findFirst({
         where: { usuario_id: userId },
       });
-      if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
+      if (!centro) {
+        throw new ForbiddenException('Centro operacional no encontrado');
+      }
       if (
-        transaccion.acopiador_id !== null &&
-        transaccion.acopiador_id !== acopiador.id
+        transaccion.centro_operacional_id !== null &&
+        transaccion.centro_operacional_id !== centro.id
       ) {
         throw new ForbiddenException('No tiene acceso a esta entrega');
+      }
+      if (
+        transaccion.acopiador_externo_id !== null ||
+        transaccion.destino_desconocido === true
+      ) {
+        throw new ForbiddenException(
+          'Esta entrega tiene como destino un acopiador externo o desconocido y no puede ser verificada desde el sistema',
+        );
       }
     } else if (userRol === 'RECOLECTOR') {
       const recolector = await this.prisma.recolector.findFirst({
@@ -448,7 +538,6 @@ export class TransaccionesService {
       }
     }
 
-    // Validar transición de estado
     const permitidas = TRANSICIONES_VALIDAS[transaccion.estado];
     if (!permitidas || !permitidas.includes(dto.estado)) {
       throw new BadRequestException(
@@ -456,18 +545,12 @@ export class TransaccionesService {
       );
     }
 
-    // PAGADO nunca se alcanza por este endpoint. El único camino válido
-    // es crear un pago desde el módulo de pagos, que registra el monto,
-    // el vínculo con la entrega y el historial en una sola operación.
-    // Permitirlo aquí dejaría la entrega marcada como pagada sin un
-    // pago real en BD y rompería los reportes de "pagado por recolector".
     if (dto.estado === 'PAGADO') {
       throw new ForbiddenException(
         'Para marcar esta entrega como pagada, registre un pago desde la sección de pagos.',
       );
     }
 
-    // Validar permisos por rol (admin queda autorizado para RECOLECTADO y ENTREGADO).
     if (
       dto.estado === 'RECOLECTADO' &&
       userRol !== 'RECOLECTOR' &&
@@ -493,32 +576,15 @@ export class TransaccionesService {
         observaciones: dto.observaciones ?? transaccion.observaciones,
       };
 
-      // Permite setear la sucursal de origen en el paso a ENTREGADO cuando
-      // la transacción no la traía (p.ej. recolector no la indicó al crear).
-      // Si ya tenía sucursal, el cliente la envía como undefined y se
-      // preserva la existente.
-      if (dto.sucursal_id != null && dto.sucursal_id !== transaccion.sucursal_id) {
-        const sucursal = await tx.sucursal.findUnique({
-          where: { id: dto.sucursal_id },
-          select: { id: true, zona_id: true },
-        });
-        if (!sucursal) throw new BadRequestException('Sucursal no encontrada');
-        updateData.sucursal = { connect: { id: sucursal.id } };
-      }
-
       // Si es recolector tomando una transacción GENERADO, se auto-asigna.
-      // El admin, en cambio, solo corrige el estado y respeta la asignación actual.
       if (dto.estado === 'RECOLECTADO') {
         if (userRol === 'RECOLECTOR') {
           const recolector = await tx.recolector.findFirst({
             where: { usuario_id: userId },
           });
           if (!recolector) throw new ForbiddenException('Recolector no encontrado');
-
           updateData.recolector = { connect: { id: recolector.id } };
-          updateData.acopiador = { connect: { id: recolector.acopiador_id } };
         } else if (userRol === 'ADMIN') {
-          // Para avanzar a RECOLECTADO la transacción ya debe tener recolector asignado.
           if (!transaccion.recolector_id) {
             throw new BadRequestException(
               'Esta entrega no tiene recolector asignado. Cree una entrega nueva indicando quién la recogió.',
@@ -527,32 +593,37 @@ export class TransaccionesService {
         }
       }
 
-      // Si es acopiador completando la transacción, se auto-asigna.
-      // El admin respeta la asignación actual.
+      // Si es centro operacional verificando, se autoasigna como destino.
       if (dto.estado === 'ENTREGADO') {
         if (userRol === 'ACOPIADOR') {
-          const acopiador = await tx.acopiador.findFirst({
+          const centro = await tx.centro_operacional.findFirst({
             where: { usuario_id: userId },
           });
-          if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
-
-          updateData.acopiador = { connect: { id: acopiador.id } };
-        } else if (userRol === 'ADMIN') {
-          // Para avanzar a ENTREGADO la transacción ya debe tener recolector y acopiador.
-          if (!transaccion.recolector_id || !transaccion.acopiador_id) {
+          if (!centro) {
+            throw new ForbiddenException('Centro operacional no encontrado');
+          }
+          if (!transaccion.recolector_id) {
             throw new BadRequestException(
-              'Esta entrega no tiene recolector o acopiador asignados. Cree una entrega nueva con los datos completos.',
+              'Esta entrega no tiene recolector. No se puede verificar.',
+            );
+          }
+          await ensureMismoDepartamento(
+            tx,
+            transaccion.recolector_id,
+            centro.id,
+          );
+          updateData.centro_operacional = { connect: { id: centro.id } };
+        } else if (userRol === 'ADMIN') {
+          if (!transaccion.recolector_id) {
+            throw new BadRequestException(
+              'Esta entrega no tiene recolector. Indique quién la recogió antes de marcarla como entregada.',
             );
           }
         }
       }
 
-      // Si vienen detalles nuevos, reemplazar los existentes
+      // Reemplazar detalles si vienen.
       if (dto.detalles?.length) {
-        // El update lo realiza RECOLECTOR (al recoger), ACOPIADOR (al
-        // verificar) o ADMIN. Ninguno de estos casos admite cantidad
-        // sin especificar — la cantidad opcional es exclusiva del
-        // GENERADOR al CREAR la transacción inicial.
         for (const d of dto.detalles) {
           if (d.cantidad == null || d.cantidad <= 0) {
             throw new BadRequestException(
@@ -561,37 +632,50 @@ export class TransaccionesService {
           }
         }
 
+        // Recolector efectivo después del update: si lo estamos
+        // auto-asignando arriba o ya existía, validamos same-depto con
+        // las sucursales nuevas.
+        const recolectorIdEfectivo =
+          updateData.recolector && 'connect' in updateData.recolector
+            ? (updateData.recolector.connect as { id: number }).id
+            : transaccion.recolector_id;
+        if (recolectorIdEfectivo != null) {
+          await this.validarSucursalesDeDetalles(
+            tx,
+            dto.detalles,
+            recolectorIdEfectivo,
+          );
+        }
+
         const detallesConSubtotal = dto.detalles.map((d) => ({
           material_id: d.material_id,
           cantidad: d.cantidad ?? 0,
           unidad_medida: d.unidad_medida,
           precio_unitario: d.precio_unitario ?? 0,
           subtotal: (d.cantidad ?? 0) * (d.precio_unitario ?? 0),
+          sucursal_id: d.sucursal_id ?? null,
         }));
 
-        const montoTotal = detallesConSubtotal.reduce((sum, d) => sum + d.subtotal, 0);
+        const montoTotal = detallesConSubtotal.reduce(
+          (sum, d) => sum + d.subtotal,
+          0,
+        );
         updateData.monto_total = montoTotal;
 
-        // Borrar detalles anteriores y crear nuevos
         await tx.detalle_transaccion.deleteMany({
           where: { transaccion_id: id },
         });
-
         await tx.detalle_transaccion.createMany({
-          data: detallesConSubtotal.map((d) => ({
-            transaccion_id: id,
-            ...d,
-          })),
+          data: detallesConSubtotal.map((d) => ({ transaccion_id: id, ...d })),
         });
       }
 
-      // Actualizar la transacción
       await tx.transaccion.update({
         where: { id },
         data: updateData,
       });
 
-      // Crear registro en historial
+      // Crear registro en historial para este avance.
       await tx.transaccion_historial.create({
         data: {
           transaccion_id: id,
@@ -606,13 +690,15 @@ export class TransaccionesService {
                   cantidad: d.cantidad ?? 0,
                   unidad_medida: d.unidad_medida,
                   precio_unitario: d.precio_unitario,
+                  ...(d.sucursal_id != null
+                    ? { sucursal_id: d.sucursal_id }
+                    : {}),
                 })),
               }
             : undefined,
         },
       });
 
-      // Retornar transacción actualizada con todas las relaciones
       return tx.transaccion.findUniqueOrThrow({
         where: { id },
         include: transaccionInclude,
@@ -622,25 +708,27 @@ export class TransaccionesService {
 
   /**
    * Listar transacciones con filtros. Filtra automáticamente por rol:
-   * - ADMIN: ve todas
-   * - ACOPIADOR: ve las de sus recolectores asignados
+   * - ADMIN: ve todas las del depto activo
+   * - ACOPIADOR: ve las que tienen como destino su centro op
    * - RECOLECTOR: ve solo las suyas
-   * - GENERADOR: ve las de sus sucursales
+   * - GENERADOR: ve las que tienen alguna de sus sucursales en algún detalle
    */
   async findAll(
     query: TransaccionQueryDto,
     userId: number,
     userRol: rol_usuario,
+    departamentoActivo: number | null,
   ) {
     const where: Prisma.transaccionWhereInput = {};
 
-    // Filtro por rol (seguridad)
     if (userRol === 'ACOPIADOR') {
-      const acopiador = await this.prisma.acopiador.findFirst({
+      const centro = await this.prisma.centro_operacional.findFirst({
         where: { usuario_id: userId },
       });
-      if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
-      where.acopiador_id = acopiador.id;
+      if (!centro) {
+        throw new ForbiddenException('Centro operacional no encontrado');
+      }
+      where.centro_operacional_id = centro.id;
     } else if (userRol === 'RECOLECTOR') {
       const recolector = await this.prisma.recolector.findFirst({
         where: { usuario_id: userId },
@@ -654,17 +742,36 @@ export class TransaccionesService {
       });
       if (!generador) throw new ForbiddenException('Generador no encontrado');
       const sucursalIds = generador.sucursal.map((s) => s.id);
-      where.sucursal_id = { in: sucursalIds };
+      // La transacción pertenece al generador si AL MENOS UNO de sus detalles
+      // viene de una de sus sucursales.
+      where.detalle_transaccion = {
+        some: { sucursal_id: { in: sucursalIds } },
+      };
+    } else if (userRol === 'ADMIN' && departamentoActivo != null) {
+      // Filtro global por depto activo. La transacción "pertenece" al depto
+      // si: (a) su recolector está en ese depto, o (b) alguno de sus
+      // detalles viene de una sucursal de ese depto (caso GENERADO sin
+      // recolector, o entregas con origen identificado).
+      where.OR = [
+        { recolector: { departamento_id: departamentoActivo } },
+        {
+          detalle_transaccion: {
+            some: { sucursal: { departamento_id: departamentoActivo } },
+          },
+        },
+      ];
     }
-    // ADMIN: sin filtro adicional
 
-    // Filtros opcionales del query
     if (query.estado) where.estado = query.estado;
     if (query.zona_id) where.zona_id = query.zona_id;
-    // Solo ADMIN puede filtrar por recolector/acopiador arbitrarios
     if (userRol === 'ADMIN') {
       if (query.recolector_id) where.recolector_id = query.recolector_id;
-      if (query.acopiador_id) where.acopiador_id = query.acopiador_id;
+      if (query.centro_operacional_id) {
+        where.centro_operacional_id = query.centro_operacional_id;
+      }
+      if (query.acopiador_externo_id) {
+        where.acopiador_externo_id = query.acopiador_externo_id;
+      }
     }
 
     if (query.fecha_desde || query.fecha_hasta) {
@@ -683,10 +790,24 @@ export class TransaccionesService {
           recolector: {
             select: { id: true, nombre_completo: true, cedula_identidad: true },
           },
-          acopiador: { select: { id: true, nombre_completo: true, nombre_punto: true } },
+          centro_operacional: {
+            select: { id: true, nombre_completo: true, nombre_punto: true },
+          },
+          acopiador_comprador_externo: {
+            select: { id: true, nombre: true, asociacion: true },
+          },
           zona: { select: { id: true, nombre: true } },
           detalle_transaccion: {
-            include: { material: { select: { id: true, nombre: true } } },
+            include: {
+              material: { select: { id: true, nombre: true } },
+              sucursal: {
+                select: {
+                  id: true,
+                  nombre: true,
+                  generador: { select: { id: true, razon_social: true } },
+                },
+              },
+            },
           },
         },
       }),
@@ -697,10 +818,14 @@ export class TransaccionesService {
   }
 
   /**
-   * Detalle de una transacción con historial completo.
-   * Valida que el usuario tenga acceso según su rol.
+   * Detalle completo de una transacción. Valida acceso por rol.
    */
-  async findOne(id: number, userId: number, userRol: rol_usuario) {
+  async findOne(
+    id: number,
+    userId: number,
+    userRol: rol_usuario,
+    departamentoActivo: number | null,
+  ) {
     const transaccion = await this.prisma.transaccion.findUnique({
       where: { id },
       include: transaccionInclude,
@@ -708,7 +833,6 @@ export class TransaccionesService {
 
     if (!transaccion) throw new NotFoundException('Entrega no encontrada');
 
-    // Validar acceso por rol
     if (userRol === 'RECOLECTOR') {
       const recolector = await this.prisma.recolector.findFirst({
         where: { usuario_id: userId },
@@ -717,10 +841,10 @@ export class TransaccionesService {
         throw new ForbiddenException('No tiene acceso a esta entrega');
       }
     } else if (userRol === 'ACOPIADOR') {
-      const acopiador = await this.prisma.acopiador.findFirst({
+      const centro = await this.prisma.centro_operacional.findFirst({
         where: { usuario_id: userId },
       });
-      if (transaccion.acopiador_id !== acopiador?.id) {
+      if (transaccion.centro_operacional_id !== centro?.id) {
         throw new ForbiddenException('No tiene acceso a esta entrega');
       }
     } else if (userRol === 'GENERADOR') {
@@ -728,9 +852,23 @@ export class TransaccionesService {
         where: { usuario_id: userId },
         include: { sucursal: { select: { id: true } } },
       });
-      const sucursalIds = generador?.sucursal.map((s) => s.id) ?? [];
-      if (!transaccion.sucursal_id || !sucursalIds.includes(transaccion.sucursal_id)) {
+      const sucursalIds = new Set(
+        generador?.sucursal.map((s) => s.id) ?? [],
+      );
+      const tieneAlguna = transaccion.detalle_transaccion.some(
+        (d) => d.sucursal_id != null && sucursalIds.has(d.sucursal_id),
+      );
+      if (!tieneAlguna) {
         throw new ForbiddenException('No tiene acceso a esta entrega');
+      }
+    } else if (userRol === 'ADMIN' && departamentoActivo != null) {
+      const deptoTransaccion = await this.derivarDeptoDeTransaccion(
+        this.prisma,
+        transaccion.id,
+        transaccion.recolector_id,
+      );
+      if (deptoTransaccion !== departamentoActivo) {
+        throw new NotFoundException('Entrega no encontrada');
       }
     }
 
@@ -738,36 +876,48 @@ export class TransaccionesService {
   }
 
   /**
-   * Transacciones pendientes de verificación para un acopiador.
-   * Retorna transacciones en estado RECOLECTADO de sus recolectores asignados.
-   * Se puede filtrar opcionalmente por un recolector específico.
+   * Transacciones pendientes de verificación para un centro operacional.
+   * RECOLECTADO con destino = este centro.
    */
   async findPendientes(userId: number, recolectorId?: number) {
-    const acopiador = await this.prisma.acopiador.findFirst({
+    const centro = await this.prisma.centro_operacional.findFirst({
       where: { usuario_id: userId },
     });
-    if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
+    if (!centro) {
+      throw new ForbiddenException('Centro operacional no encontrado');
+    }
 
     return this.prisma.transaccion.findMany({
       where: {
-        acopiador_id: acopiador.id,
+        centro_operacional_id: centro.id,
         estado: 'RECOLECTADO',
         ...(recolectorId ? { recolector_id: recolectorId } : {}),
       },
       orderBy: { fecha_creacion: 'desc' },
       include: {
-        recolector: { select: { id: true, nombre_completo: true, cedula_identidad: true } },
+        recolector: {
+          select: { id: true, nombre_completo: true, cedula_identidad: true },
+        },
         zona: { select: { id: true, nombre: true } },
         detalle_transaccion: {
-          include: { material: { select: { id: true, nombre: true } } },
+          include: {
+            material: { select: { id: true, nombre: true } },
+            sucursal: {
+              select: {
+                id: true,
+                nombre: true,
+                generador: { select: { id: true, razon_social: true } },
+              },
+            },
+          },
         },
       },
     });
   }
 
   /**
-   * Transacciones disponibles para recoger (estado GENERADO en la zona del recolector).
-   * Son transacciones creadas por generadores que aún no fueron recogidas.
+   * Transacciones disponibles para recoger (GENERADO sin recolector en la
+   * zona del recolector consultante).
    */
   async findDisponibles(userId: number) {
     const recolector = await this.prisma.recolector.findFirst({
@@ -783,37 +933,42 @@ export class TransaccionesService {
       },
       orderBy: { fecha_creacion: 'desc' },
       include: {
-        sucursal: {
-          select: {
-            id: true,
-            nombre: true,
-            generador: { select: { id: true, razon_social: true } },
-          },
-        },
         zona: { select: { id: true, nombre: true } },
         detalle_transaccion: {
-          include: { material: { select: { id: true, nombre: true } } },
+          include: {
+            material: { select: { id: true, nombre: true } },
+            sucursal: {
+              select: {
+                id: true,
+                nombre: true,
+                generador: { select: { id: true, razon_social: true } },
+              },
+            },
+          },
         },
       },
     });
   }
 
   /**
-   * Edición completa por el admin. No avanza el estado (para avanzar se
-   * usa update()). Permite corregir errores de carga: fecha, hora,
-   * recolector, sucursal, materiales, observaciones.
+   * Edición completa por el admin. No avanza el estado.
    *
    * Reglas:
-   * - Si la entrega ya está pagada (tiene `pago_transaccion`), solo se
-   *   permite cambiar `observaciones`. Cualquier otro campo devuelve 400.
-   * - El nuevo recolector debe pertenecer al mismo acopiador actual
-   *   (regla del cliente: relación recolector↔acopiador fija).
-   * - Cambiar `sucursal_id` ajusta el paso GENERADO del historial:
-   *   se inserta, elimina o actualiza según corresponda.
-   * - Cambiar `recolector_id` actualiza el `actor_id` del paso
-   *   RECOLECTADO del historial al nuevo usuario.
+   * - Si la entrega ya está pagada, solo se permite cambiar `observaciones`.
+   * - Si se asigna un centro operacional como destino, debe estar en el
+   *   mismo departamento que el recolector.
+   * - Si se asigna un acopiador externo, debe estar activo.
+   * - Cambiar `recolector_id` actualiza el `actor_id` del paso RECOLECTADO.
+   * - Cambiar `detalles` recalcula los pasos GENERADO automáticos: se
+   *   eliminan los existentes y se vuelven a crear según las sucursales
+   *   distintas que aparezcan en los nuevos detalles.
+   * - El destino se redefine completo si llega cualquiera de los 3 campos.
    */
-  async editAdmin(id: number, dto: EditTransaccionAdminDto) {
+  async editAdmin(
+    id: number,
+    dto: EditTransaccionAdminDto,
+    departamentoActivo: number | null,
+  ) {
     const existente = await this.prisma.transaccion.findUnique({
       where: { id },
       include: {
@@ -821,19 +976,38 @@ export class TransaccionesService {
         transaccion_historial: {
           select: { id: true, estado: true, actor_id: true },
         },
+        recolector: { select: { departamento_id: true } },
+        detalle_transaccion: {
+          select: {
+            sucursal: { select: { departamento_id: true } },
+          },
+        },
       },
     });
     if (!existente) throw new NotFoundException('Entrega no encontrada');
 
+    // Filtro global: el admin solo puede editar transacciones de su depto activo.
+    if (departamentoActivo != null) {
+      const deptoTransaccion =
+        existente.recolector?.departamento_id ??
+        existente.detalle_transaccion.find((d) => d.sucursal != null)
+          ?.sucursal?.departamento_id ??
+        null;
+      if (deptoTransaccion !== departamentoActivo) {
+        throw new NotFoundException('Entrega no encontrada');
+      }
+    }
+
     const tienePago = existente.pago_transaccion != null;
 
     if (tienePago) {
-      // Con pago registrado, solo se puede editar la observación.
       const intentaOtroCampo =
         dto.fecha !== undefined ||
         dto.hora !== undefined ||
         dto.recolector_id !== undefined ||
-        dto.sucursal_id !== undefined ||
+        dto.centro_operacional_id !== undefined ||
+        dto.acopiador_externo_id !== undefined ||
+        dto.destino_desconocido !== undefined ||
         (dto.detalles !== undefined && dto.detalles.length > 0);
 
       if (intentaOtroCampo) {
@@ -850,7 +1024,6 @@ export class TransaccionesService {
         updateData.observaciones = dto.observaciones;
       }
 
-      // Fecha / hora: solo si no está pagada (el guard de arriba lo asegura).
       if (dto.fecha !== undefined) {
         const fechaParsed = new Date(dto.fecha);
         if (fechaParsed > new Date()) {
@@ -869,31 +1042,33 @@ export class TransaccionesService {
         updateData.hora = new Date(1970, 0, 1, Number(hh), Number(mm), 0);
       }
 
-      // Cambiar recolector. El nuevo debe pertenecer al mismo acopiador
-      // actual — regla del cliente, el recolector↔acopiador es fijo.
+      // Cambiar recolector.
       if (
         dto.recolector_id !== undefined &&
         dto.recolector_id !== existente.recolector_id
       ) {
         const nuevo = await tx.recolector.findUnique({
           where: { id: dto.recolector_id },
-          select: { id: true, usuario_id: true, acopiador_id: true },
+          select: { id: true, usuario_id: true, departamento_id: true },
         });
         if (!nuevo) {
           throw new BadRequestException('Recolector no encontrado');
         }
-        if (
-          existente.acopiador_id != null &&
-          nuevo.acopiador_id !== existente.acopiador_id
-        ) {
-          throw new BadRequestException(
-            'Este recolector no pertenece al mismo acopiador de la entrega',
+        // Si la transacción tiene destino centro op, el nuevo recolector
+        // debe estar en el mismo depto que ese centro op.
+        const existenteCentroOp = await tx.transaccion.findUnique({
+          where: { id },
+          select: { centro_operacional_id: true },
+        });
+        if (existenteCentroOp?.centro_operacional_id != null) {
+          await ensureMismoDepartamento(
+            tx,
+            nuevo.id,
+            existenteCentroOp.centro_operacional_id,
           );
         }
         updateData.recolector = { connect: { id: nuevo.id } };
-        updateData.acopiador = { connect: { id: nuevo.acopiador_id } };
 
-        // Actualizar actor_id del paso RECOLECTADO del historial.
         const pasoRecolectado = existente.transaccion_historial.find(
           (h) => h.estado === 'RECOLECTADO',
         );
@@ -905,63 +1080,48 @@ export class TransaccionesService {
         }
       }
 
-      // Cambiar sucursal. Tres casos:
-      //  a) de null/X a Y distinto: validar, actualizar/insertar paso GENERADO.
-      //  b) de X a null: quitar paso GENERADO (si existe).
-      //  c) sin cambio: no hacer nada.
-      if (dto.sucursal_id !== undefined) {
-        const sucursalActual = existente.sucursal_id;
-        const pasoGenerado = existente.transaccion_historial.find(
-          (h) => h.estado === 'GENERADO',
+      // Cambiar destino (polimórfico).
+      const tocaDestino =
+        dto.centro_operacional_id !== undefined ||
+        dto.acopiador_externo_id !== undefined ||
+        dto.destino_desconocido !== undefined;
+
+      if (tocaDestino) {
+        this.validarUnicidadDestino(
+          dto.centro_operacional_id,
+          dto.acopiador_externo_id,
+          dto.destino_desconocido,
         );
 
-        if (dto.sucursal_id === null) {
-          // Quitar sucursal.
-          updateData.sucursal = { disconnect: true };
-          if (pasoGenerado) {
-            await tx.transaccion_historial.delete({
-              where: { id: pasoGenerado.id },
-            });
-          }
-        } else if (dto.sucursal_id !== sucursalActual) {
-          const sucursal = await tx.sucursal.findUnique({
-            where: { id: dto.sucursal_id },
-            include: { generador: { select: { usuario_id: true } } },
-          });
-          if (!sucursal) {
-            throw new BadRequestException('Sucursal no encontrada');
-          }
-          updateData.sucursal = { connect: { id: sucursal.id } };
+        const nuevoCentro = dto.centro_operacional_id ?? null;
+        const nuevoExterno = dto.acopiador_externo_id ?? null;
+        const nuevoDesconocido = dto.destino_desconocido === true;
 
-          if (pasoGenerado) {
-            // Actualizar actor_id del paso GENERADO existente.
-            await tx.transaccion_historial.update({
-              where: { id: pasoGenerado.id },
-              data: { actor_id: sucursal.generador.usuario_id },
-            });
-          } else {
-            // Insertar paso GENERADO al inicio del historial. Usamos
-            // fecha_creacion − 1ms para garantizar que quede antes del
-            // paso RECOLECTADO original (que comparte el mismo ms y
-            // tiene id menor al del GENERADO reinsertado — el orderBy
-            // desempata por id, por eso ajustamos el timestamp).
-            const fechaGenerado = new Date(
-              existente.fecha_creacion.getTime() - 1,
+        if (nuevoCentro != null) {
+          const recolectorIdEfectivo =
+            dto.recolector_id ?? existente.recolector_id;
+          if (recolectorIdEfectivo == null) {
+            throw new BadRequestException(
+              'No se puede asignar un centro operacional si la entrega no tiene recolector',
             );
-            await tx.transaccion_historial.create({
-              data: {
-                transaccion_id: id,
-                estado: 'GENERADO',
-                actor_id: sucursal.generador.usuario_id,
-                rol_actor: 'GENERADOR',
-                fecha: fechaGenerado,
-              },
-            });
           }
+          await ensureMismoDepartamento(tx, recolectorIdEfectivo, nuevoCentro);
         }
+        if (nuevoExterno != null) {
+          await this.verificarExternoActivo(tx, nuevoExterno);
+        }
+
+        await tx.transaccion.update({
+          where: { id },
+          data: {
+            centro_operacional_id: nuevoCentro,
+            acopiador_externo_id: nuevoExterno,
+            destino_desconocido: nuevoDesconocido,
+          },
+        });
       }
 
-      // Detalles: reemplazar completos si vienen.
+      // Reemplazar detalles si vienen.
       if (dto.detalles !== undefined && dto.detalles.length > 0) {
         for (const d of dto.detalles) {
           if (d.cantidad == null || d.cantidad <= 0) {
@@ -970,6 +1130,18 @@ export class TransaccionesService {
             );
           }
         }
+
+        // Validar sucursales same-depto con el recolector resultante.
+        const recolectorIdEfectivo =
+          dto.recolector_id ?? existente.recolector_id;
+        if (recolectorIdEfectivo != null) {
+          await this.validarSucursalesDeDetalles(
+            tx,
+            dto.detalles,
+            recolectorIdEfectivo,
+          );
+        }
+
         const detallesConSubtotal = dto.detalles.map((d) => ({
           transaccion_id: id,
           material_id: d.material_id,
@@ -977,6 +1149,7 @@ export class TransaccionesService {
           unidad_medida: d.unidad_medida,
           precio_unitario: d.precio_unitario ?? 0,
           subtotal: (d.cantidad ?? 0) * (d.precio_unitario ?? 0),
+          sucursal_id: d.sucursal_id ?? null,
         }));
         await tx.detalle_transaccion.deleteMany({
           where: { transaccion_id: id },
@@ -987,6 +1160,65 @@ export class TransaccionesService {
           0,
         );
         updateData.monto_total = montoTotal;
+
+        // Reconstruir pasos GENERADO automáticos en el historial. Solo
+        // tocamos los pasos GENERADO con `rol_actor = GENERADOR` que NO
+        // fueron creados por el propio generador desde la app. Como no
+        // hay forma reliable de distinguirlos del "natural", aplicamos
+        // una regla conservadora: si la transacción NO fue creada por
+        // GENERADOR, eliminamos TODOS los pasos GENERADO y los recreamos
+        // según las sucursales nuevas. Si fue creada por GENERADOR, no
+        // tocamos el paso natural (raro en editAdmin, pero defensivo).
+        const transFull = await tx.transaccion.findUnique({
+          where: { id },
+          select: {
+            creado_por_id: true,
+            usuario: { select: { rol: true } },
+            fecha_creacion: true,
+          },
+        });
+        const creadoPorGenerador =
+          transFull?.usuario?.rol === ('GENERADOR' as rol_usuario);
+
+        if (!creadoPorGenerador) {
+          const pasosGeneradoExistentes =
+            existente.transaccion_historial.filter(
+              (h) => h.estado === 'GENERADO',
+            );
+          if (pasosGeneradoExistentes.length > 0) {
+            await tx.transaccion_historial.deleteMany({
+              where: {
+                id: { in: pasosGeneradoExistentes.map((p) => p.id) },
+              },
+            });
+          }
+
+          // Crear pasos GENERADO nuevos por cada sucursal distinta de los
+          // detalles. Usamos timestamp ligeramente anterior a fecha_creacion
+          // para que aparezcan antes en el orden cronológico.
+          const pasosGenerado = await this.buildPasosGeneradoAuto(
+            tx,
+            dto.detalles,
+          );
+          if (pasosGenerado.length > 0 && transFull) {
+            const baseTs = transFull.fecha_creacion.getTime();
+            for (let i = 0; i < pasosGenerado.length; i++) {
+              const p = pasosGenerado[i];
+              await tx.transaccion_historial.create({
+                data: {
+                  transaccion_id: id,
+                  estado: p.estado,
+                  actor_id: p.actor_id,
+                  rol_actor: p.rol_actor,
+                  observaciones: p.observaciones,
+                  detalles: p.detalles as unknown as Prisma.InputJsonValue,
+                  // -i ms para mantener orden estable.
+                  fecha: new Date(baseTs - (pasosGenerado.length - i)),
+                },
+              });
+            }
+          }
+        }
       }
 
       if (Object.keys(updateData).length > 0) {
@@ -1001,16 +1233,34 @@ export class TransaccionesService {
   }
 
   /**
-   * Hard delete de una entrega. Reglas:
-   * - Bloqueado si la entrega tiene un pago vinculado (409).
-   * - Si no, CASCADE limpia historial y detalles automáticamente.
+   * Hard delete de una entrega. Bloqueado si tiene pago. CASCADE limpia
+   * historial y detalles.
    */
-  async remove(id: number) {
+  async remove(id: number, departamentoActivo: number | null) {
     const existente = await this.prisma.transaccion.findUnique({
       where: { id },
-      include: { pago_transaccion: { select: { id: true } } },
+      include: {
+        pago_transaccion: { select: { id: true } },
+        recolector: { select: { departamento_id: true } },
+        detalle_transaccion: {
+          select: {
+            sucursal: { select: { departamento_id: true } },
+          },
+        },
+      },
     });
     if (!existente) throw new NotFoundException('Entrega no encontrada');
+
+    if (departamentoActivo != null) {
+      const deptoTransaccion =
+        existente.recolector?.departamento_id ??
+        existente.detalle_transaccion.find((d) => d.sucursal != null)
+          ?.sucursal?.departamento_id ??
+        null;
+      if (deptoTransaccion !== departamentoActivo) {
+        throw new NotFoundException('Entrega no encontrada');
+      }
+    }
 
     if (existente.pago_transaccion != null) {
       throw new BadRequestException(
@@ -1019,5 +1269,164 @@ export class TransaccionesService {
     }
 
     await this.prisma.transaccion.delete({ where: { id } });
+  }
+
+  // ------------------------------------------------------------------
+  // Helpers privados
+  // ------------------------------------------------------------------
+
+  private validarUnicidadDestino(
+    centroOperacionalId?: number | null,
+    acopiadorExternoId?: number | null,
+    destinoDesconocido?: boolean,
+  ): void {
+    const count =
+      (centroOperacionalId != null ? 1 : 0) +
+      (acopiadorExternoId != null ? 1 : 0) +
+      (destinoDesconocido === true ? 1 : 0);
+    if (count > 1) {
+      throw new BadRequestException(
+        'Solo se puede indicar un destino: centro operacional, acopiador externo o desconocido (no varios al mismo tiempo)',
+      );
+    }
+  }
+
+  private async verificarExternoActivo(
+    tx: Prisma.TransactionClient,
+    externoId: number,
+  ): Promise<void> {
+    const externo = await tx.acopiador_comprador_externo.findUnique({
+      where: { id: externoId },
+      select: { id: true, activo: true },
+    });
+    if (!externo) {
+      throw new BadRequestException('Acopiador/Comprador externo no encontrado');
+    }
+    if (!externo.activo) {
+      throw new BadRequestException('Acopiador/Comprador externo inactivo');
+    }
+  }
+
+  /**
+   * Valida que todas las sucursales presentes en los detalles pertenezcan
+   * al mismo departamento que el recolector. Las líneas sin sucursal_id se
+   * ignoran (origen no identificado, permitido).
+   */
+  private async validarSucursalesDeDetalles(
+    tx: Prisma.TransactionClient,
+    detalles: DetalleTransaccionDto[],
+    recolectorId: number,
+  ): Promise<void> {
+    const sucursalIds = [
+      ...new Set(
+        detalles
+          .filter((d) => d.sucursal_id != null)
+          .map((d) => d.sucursal_id as number),
+      ),
+    ];
+    if (sucursalIds.length === 0) return;
+
+    const recolector = await tx.recolector.findUnique({
+      where: { id: recolectorId },
+      select: { departamento_id: true },
+    });
+    if (!recolector) {
+      throw new BadRequestException('Recolector no encontrado');
+    }
+
+    const sucursales = await tx.sucursal.findMany({
+      where: { id: { in: sucursalIds } },
+      select: { id: true, departamento_id: true },
+    });
+    if (sucursales.length !== sucursalIds.length) {
+      throw new BadRequestException('Alguna sucursal indicada no existe');
+    }
+    for (const s of sucursales) {
+      if (s.departamento_id !== recolector.departamento_id) {
+        throw new ForbiddenException(
+          'Alguna sucursal pertenece a un departamento distinto al del recolector',
+        );
+      }
+    }
+  }
+
+  /**
+   * Construye los pasos GENERADO automáticos del historial: uno por cada
+   * sucursal distinta presente en los detalles. Cada paso lleva el subset
+   * de materiales que vinieron de esa sucursal y como actor al usuario
+   * generador dueño de la sucursal.
+   *
+   * Devuelve un array vacío si ningún detalle tiene `sucursal_id` (origen
+   * no identificado).
+   */
+  private async buildPasosGeneradoAuto(
+    tx: Prisma.TransactionClient,
+    detalles: DetalleTransaccionDto[],
+  ): Promise<HistorialCreate[]> {
+    const grupos = new Map<number, DetalleTransaccionDto[]>();
+    for (const d of detalles) {
+      if (d.sucursal_id == null) continue;
+      const arr = grupos.get(d.sucursal_id) ?? [];
+      arr.push(d);
+      grupos.set(d.sucursal_id, arr);
+    }
+    if (grupos.size === 0) return [];
+
+    const sucursalIds = [...grupos.keys()];
+    const sucursales = await tx.sucursal.findMany({
+      where: { id: { in: sucursalIds } },
+      include: { generador: { select: { usuario_id: true } } },
+    });
+    const generadorPorSucursal = new Map(
+      sucursales.map((s) => [s.id, s.generador.usuario_id]),
+    );
+
+    return sucursalIds.map((sucursalId) => {
+      const detallesDeEsta = grupos.get(sucursalId)!;
+      const usuarioGenerador = generadorPorSucursal.get(sucursalId)!;
+      return {
+        estado: 'GENERADO' as estado_transaccion,
+        actor_id: usuarioGenerador,
+        rol_actor: 'GENERADOR' as rol_usuario,
+        observaciones: undefined,
+        detalles: {
+          materiales: detallesDeEsta.map((d) => ({
+            material_id: d.material_id,
+            cantidad: d.cantidad ?? 0,
+            unidad_medida: d.unidad_medida,
+            precio_unitario: undefined as number | undefined,
+          })),
+          sucursal_id: sucursalId,
+        },
+      };
+    });
+  }
+
+  /**
+   * Deriva el departamento al que pertenece una transacción para fines de
+   * scope del admin. Prioridad: (a) departamento del recolector si existe;
+   * (b) departamento de la primera sucursal asignada en algún detalle.
+   * Devuelve null si no se puede determinar.
+   */
+  private async derivarDeptoDeTransaccion(
+    prisma: PrismaService | Prisma.TransactionClient,
+    transaccionId: number,
+    recolectorId: number | null,
+  ): Promise<number | null> {
+    if (recolectorId != null) {
+      const r = await prisma.recolector.findUnique({
+        where: { id: recolectorId },
+        select: { departamento_id: true },
+      });
+      return r?.departamento_id ?? null;
+    }
+    const detalle = await prisma.detalle_transaccion.findFirst({
+      where: {
+        transaccion_id: transaccionId,
+        sucursal_id: { not: null },
+      },
+      select: { sucursal: { select: { departamento_id: true } } },
+    });
+    return detalle?.sucursal?.departamento_id ?? null;
   }
 }

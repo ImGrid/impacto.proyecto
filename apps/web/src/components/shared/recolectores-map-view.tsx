@@ -25,8 +25,8 @@ type RecolectorMapItem = {
   latitud: number | null;
   longitud: number | null;
   activo: boolean;
-  acopiador: { nombre_completo: string };
   zona: { nombre: string };
+  departamento: { nombre: string };
 };
 
 interface RecolectoresMapViewProps {
@@ -88,10 +88,10 @@ export default function RecolectoresMapView({
             <div className="text-sm">
               <p className="font-semibold">{rec.nombre_completo}</p>
               <p className="text-muted-foreground">{rec.direccion_domicilio}</p>
-              <p className="text-muted-foreground">
-                Acopiador: {rec.acopiador.nombre_completo}
-              </p>
               <p className="text-muted-foreground">Zona: {rec.zona.nombre}</p>
+              <p className="text-muted-foreground">
+                Departamento: {rec.departamento.nombre}
+              </p>
               {!rec.activo && (
                 <p className="mt-1 text-xs text-gray-400">Inactivo</p>
               )}

@@ -23,6 +23,10 @@ export const recolectoresKeys = {
   mapa: () => [...recolectoresKeys.all, "mapa"] as const,
 };
 
+// El backend filtra automáticamente por el departamento activo de la sesión
+// (`departamento_activo` del JWT). El filtro `acopiador_id` ya no existe:
+// el vínculo fijo recolector ↔ centro operacional se eliminó con el cambio
+// definitivo. Verificado en `apps/api/src/recolectores/dto/recolector-query.dto.ts`.
 type UseRecolectoresParams = {
   page?: number;
   limit?: number;
@@ -30,7 +34,6 @@ type UseRecolectoresParams = {
   search?: string;
   activo?: boolean;
   zona_id?: number;
-  acopiador_id?: number;
   asociacion_id?: number;
   genero?: string;
   trabaja_individual?: boolean;
@@ -39,9 +42,16 @@ type UseRecolectoresParams = {
 
 export function useRecolectores(params: UseRecolectoresParams = {}) {
   const {
-    page = 1, limit = 10, sortOrder = "asc", search,
-    activo, zona_id, acopiador_id, asociacion_id, genero,
-    trabaja_individual, material_id,
+    page = 1,
+    limit = 10,
+    sortOrder = "asc",
+    search,
+    activo,
+    zona_id,
+    asociacion_id,
+    genero,
+    trabaja_individual,
+    material_id,
   } = params;
 
   const searchParams = new URLSearchParams();
@@ -51,16 +61,24 @@ export function useRecolectores(params: UseRecolectoresParams = {}) {
   if (search) searchParams.set("search", search);
   if (activo !== undefined) searchParams.set("activo", String(activo));
   if (zona_id) searchParams.set("zona_id", String(zona_id));
-  if (acopiador_id) searchParams.set("acopiador_id", String(acopiador_id));
   if (asociacion_id) searchParams.set("asociacion_id", String(asociacion_id));
   if (genero) searchParams.set("genero", genero);
-  if (trabaja_individual !== undefined) searchParams.set("trabaja_individual", String(trabaja_individual));
+  if (trabaja_individual !== undefined)
+    searchParams.set("trabaja_individual", String(trabaja_individual));
   if (material_id) searchParams.set("material_id", String(material_id));
 
   return useQuery({
     queryKey: recolectoresKeys.list({
-      page, limit, sortOrder, search, activo, zona_id, acopiador_id,
-      asociacion_id, genero, trabaja_individual, material_id,
+      page,
+      limit,
+      sortOrder,
+      search,
+      activo,
+      zona_id,
+      asociacion_id,
+      genero,
+      trabaja_individual,
+      material_id,
     }),
     queryFn: () =>
       clientGet<PaginatedResponse<Recolector>>(
@@ -70,6 +88,8 @@ export function useRecolectores(params: UseRecolectoresParams = {}) {
   });
 }
 
+// Shape devuelto por GET /recolectores/mapa.
+// Verificado contra `recolectores.service.ts#findAllForMap`.
 type RecolectorMapa = {
   id: number;
   nombre_completo: string;
@@ -77,8 +97,8 @@ type RecolectorMapa = {
   latitud: number | null;
   longitud: number | null;
   activo: boolean;
-  acopiador: { nombre_completo: string };
   zona: { nombre: string };
+  departamento: { nombre: string };
 };
 
 export function useRecolectoresMapa() {
@@ -100,7 +120,7 @@ export function useCreateRecolector() {
 
   return useMutation({
     mutationFn: (data: {
-      email: string;
+      email?: string;
       password: string;
       nombre_completo: string;
       cedula_identidad: string;
@@ -108,8 +128,8 @@ export function useCreateRecolector() {
       direccion_domicilio: string;
       latitud: number;
       longitud: number;
-      acopiador_id: number;
       zona_id: number;
+      departamento_id: number;
       genero: Genero;
       edad: number;
       asociacion_id?: number;
@@ -144,8 +164,8 @@ export function useUpdateRecolector() {
         direccion_domicilio?: string;
         latitud?: number;
         longitud?: number;
-        acopiador_id?: number;
         zona_id?: number;
+        departamento_id?: number;
         genero?: Genero;
         edad?: number;
         asociacion_id?: number;

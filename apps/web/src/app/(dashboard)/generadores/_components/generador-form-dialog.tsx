@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -8,7 +7,7 @@ import { z } from "zod/v4";
 import { Loader2, MapPin } from "lucide-react";
 import { useCreateGenerador, useUpdateGenerador } from "@/hooks/use-generadores";
 import { useTiposGenerador } from "@/hooks/use-tipos-generador";
-import type { Generador } from "@/types/api";
+import type { Generador, TipoGenerador } from "@/types/api";
 import {
   Dialog,
   DialogContent,
@@ -83,34 +82,84 @@ interface GeneradorFormDialogProps {
   generador?: Generador;
 }
 
+/**
+ * Shell del diálogo. El form sólo se monta cuando los catálogos están listos
+ * para evitar el bug en Radix Select donde un value controlado no se aplica
+ * si los <SelectItem> aún no se montaron al primer render.
+ */
 export function GeneradorFormDialog({
   open,
   onOpenChange,
   generador,
 }: GeneradorFormDialogProps) {
+  const { data: tiposData } = useTiposGenerador({ limit: 100 });
+  const isEditing = !!generador;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
+            {isEditing ? "Editar generador" : "Crear generador"}
+          </DialogTitle>
+          <DialogDescription>
+            {isEditing
+              ? "Modifique los datos de la empresa generadora."
+              : "Complete los datos para registrar una nueva empresa generadora."}
+          </DialogDescription>
+        </DialogHeader>
+
+        {!open ? null : !tiposData ? (
+          <div className="py-8 text-center text-muted-foreground">
+            Cargando...
+          </div>
+        ) : (
+          <GeneradorForm
+            key={generador?.id ?? "new"}
+            generador={generador}
+            tiposGenerador={tiposData.data}
+            onClose={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface GeneradorFormProps {
+  generador?: Generador;
+  tiposGenerador: TipoGenerador[];
+  onClose: () => void;
+}
+
+function GeneradorForm({
+  generador,
+  tiposGenerador,
+  onClose,
+}: GeneradorFormProps) {
   const isEditing = !!generador;
   const createMutation = useCreateGenerador();
   const updateMutation = useUpdateGenerador();
   const isPending = createMutation.isPending || updateMutation.isPending;
-
-  // Cargar tipos de generador para el Select
-  const { data: tiposData, isLoading: tiposLoading } = useTiposGenerador({
-    limit: 100,
-  });
-  const tiposGenerador = tiposData?.data ?? [];
 
   const form = useForm<FormValues>({
     resolver: zodResolver(isEditing ? updateSchema : createSchema),
     defaultValues: {
       email: "",
       password: "",
-      razon_social: "",
-      tipo_generador_id: "",
-      contacto_nombre: "",
-      contacto_telefono: "",
-      contacto_email: "",
-      latitud: null,
-      longitud: null,
+      razon_social: generador?.razon_social ?? "",
+      tipo_generador_id: generador ? String(generador.tipo_generador_id) : "",
+      contacto_nombre: generador?.contacto_nombre ?? "",
+      contacto_telefono: generador?.contacto_telefono ?? "",
+      contacto_email: generador?.contacto_email ?? "",
+      latitud:
+        generador && generador.latitud != null
+          ? Number(generador.latitud)
+          : null,
+      longitud:
+        generador && generador.longitud != null
+          ? Number(generador.longitud)
+          : null,
     },
   });
 
@@ -121,36 +170,6 @@ export function GeneradorFormDialog({
     latitud != null && longitud != null
       ? { lat: latitud, lng: longitud }
       : null;
-
-  useEffect(() => {
-    if (open) {
-      if (isEditing) {
-        form.reset({
-          email: "",
-          password: "",
-          razon_social: generador.razon_social,
-          tipo_generador_id: String(generador.tipo_generador_id),
-          contacto_nombre: generador.contacto_nombre,
-          contacto_telefono: generador.contacto_telefono,
-          contacto_email: generador.contacto_email ?? "",
-          latitud: generador.latitud != null ? Number(generador.latitud) : null,
-          longitud: generador.longitud != null ? Number(generador.longitud) : null,
-        });
-      } else {
-        form.reset({
-          email: "",
-          password: "",
-          razon_social: "",
-          tipo_generador_id: "",
-          contacto_nombre: "",
-          contacto_telefono: "",
-          contacto_email: "",
-          latitud: null,
-          longitud: null,
-        });
-      }
-    }
-  }, [open, generador, isEditing, form]);
 
   function handlePositionChange(lat: number, lng: number) {
     form.setValue("latitud", parseFloat(lat.toFixed(8)), {
@@ -175,84 +194,32 @@ export function GeneradorFormDialog({
     if (isEditing) {
       updateMutation.mutate(
         { id: generador.id, data: shared },
-        { onSuccess: () => onOpenChange(false) },
+        { onSuccess: () => onClose() },
       );
     } else {
       createMutation.mutate(
         { email: data.email!, password: data.password!, ...shared },
-        { onSuccess: () => onOpenChange(false) },
+        { onSuccess: () => onClose() },
       );
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            {isEditing ? "Editar generador" : "Crear generador"}
-          </DialogTitle>
-          <DialogDescription>
-            {isEditing
-              ? "Modifique los datos de la empresa generadora."
-              : "Complete los datos para registrar una nueva empresa generadora."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            {/* Email y password solo al crear */}
-            {!isEditing && (
-              <>
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="email"
-                          placeholder="correo@empresa.com"
-                          disabled={isPending}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Contrasena</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="password"
-                          placeholder="Minimo 8 caracteres"
-                          disabled={isPending}
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </>
-            )}
-
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        {/* Email y password solo al crear */}
+        {!isEditing && (
+          <>
             <FormField
               control={form.control}
-              name="razon_social"
+              name="email"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Razon social</FormLabel>
+                  <FormLabel>Email</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="Nombre de la empresa"
+                      type="email"
+                      placeholder="correo@empresa.com"
                       disabled={isPending}
                       {...field}
                     />
@@ -264,48 +231,14 @@ export function GeneradorFormDialog({
 
             <FormField
               control={form.control}
-              name="tipo_generador_id"
+              name="password"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Tipo de generador</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                    disabled={isPending || tiposLoading}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-full">
-                        <SelectValue
-                          placeholder={
-                            tiposLoading
-                              ? "Cargando tipos..."
-                              : "Seleccionar tipo"
-                          }
-                        />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {tiposGenerador.map((tipo) => (
-                        <SelectItem key={tipo.id} value={String(tipo.id)}>
-                          {tipo.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="contacto_nombre"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Nombre de contacto</FormLabel>
+                  <FormLabel>Contraseña</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder="Persona de contacto"
+                      type="password"
+                      placeholder="Mínimo 8 caracteres"
                       disabled={isPending}
                       {...field}
                     />
@@ -314,96 +247,159 @@ export function GeneradorFormDialog({
                 </FormItem>
               )}
             />
+          </>
+        )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="contacto_telefono"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Telefono de contacto</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Numero de contacto"
-                        disabled={isPending}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+        <FormField
+          control={form.control}
+          name="razon_social"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Razón social</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder="Nombre de la empresa"
+                  disabled={isPending}
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-              <FormField
-                control={form.control}
-                name="contacto_email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email de contacto</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="email"
-                        placeholder="Opcional"
-                        disabled={isPending}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            {/* Mapa para seleccionar ubicacion */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">
-                  Ubicacion en el mapa
-                </span>
-              </div>
-              <p className="text-muted-foreground text-xs">
-                Haga click en el mapa para marcar la ubicacion de la empresa.
-                Puede arrastrar el marcador para ajustar la posicion.
-              </p>
-              <MapPicker
-                position={mapPosition}
-                radiusKm={0}
-                onPositionChange={handlePositionChange}
-              />
-              {mapPosition && (
-                <p className="text-muted-foreground text-xs">
-                  Lat: {mapPosition.lat.toFixed(6)}, Lng:{" "}
-                  {mapPosition.lng.toFixed(6)}
-                </p>
-              )}
-            </div>
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
+        <FormField
+          control={form.control}
+          name="tipo_generador_id"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Tipo de generador</FormLabel>
+              <Select
+                onValueChange={field.onChange}
+                value={field.value}
                 disabled={isPending}
               >
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Guardando...
-                  </>
-                ) : isEditing ? (
-                  "Guardar cambios"
-                ) : (
-                  "Crear generador"
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        </Form>
-      </DialogContent>
-    </Dialog>
+                <FormControl>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Seleccionar tipo" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {tiposGenerador.map((tipo) => (
+                    <SelectItem key={tipo.id} value={String(tipo.id)}>
+                      {tipo.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="contacto_nombre"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Nombre de contacto</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder="Persona de contacto"
+                  disabled={isPending}
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            control={form.control}
+            name="contacto_telefono"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Teléfono de contacto</FormLabel>
+                <FormControl>
+                  <Input
+                    placeholder="Número de contacto"
+                    disabled={isPending}
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="contacto_email"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Email de contacto</FormLabel>
+                <FormControl>
+                  <Input
+                    type="email"
+                    placeholder="Opcional"
+                    disabled={isPending}
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        {/* Mapa para seleccionar ubicación */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Ubicación en el mapa</span>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Haga click en el mapa para marcar la ubicación de la empresa.
+            Puede arrastrar el marcador para ajustar la posición.
+          </p>
+          <MapPicker
+            position={mapPosition}
+            radiusKm={0}
+            onPositionChange={handlePositionChange}
+          />
+          {mapPosition && (
+            <p className="text-muted-foreground text-xs">
+              Lat: {mapPosition.lat.toFixed(6)}, Lng:{" "}
+              {mapPosition.lng.toFixed(6)}
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={isPending}
+          >
+            Cancelar
+          </Button>
+          <Button type="submit" disabled={isPending}>
+            {isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Guardando...
+              </>
+            ) : isEditing ? (
+              "Guardar cambios"
+            ) : (
+              "Crear generador"
+            )}
+          </Button>
+        </DialogFooter>
+      </form>
+    </Form>
   );
 }

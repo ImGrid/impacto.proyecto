@@ -64,12 +64,40 @@ export function makeColumns(options: {
         ),
     },
     {
-      id: "acopiador",
-      header: "Acopiador",
-      cell: ({ row }) =>
-        row.original.acopiador?.nombre_completo ?? (
-          <span className="text-muted-foreground">—</span>
-        ),
+      id: "destino",
+      header: "Destino",
+      cell: ({ row }) => {
+        const t = row.original;
+        // Destino polimórfico. Máximo uno marcado por CHECK constraint en BD.
+        if (t.centro_operacional) {
+          return (
+            <span className="text-sm">
+              {t.centro_operacional.nombre_completo}
+              <span className="text-muted-foreground text-xs block">
+                {t.centro_operacional.nombre_punto}
+              </span>
+            </span>
+          );
+        }
+        if (t.acopiador_comprador_externo) {
+          return (
+            <span className="text-sm">
+              {t.acopiador_comprador_externo.nombre}
+              <span className="text-muted-foreground text-xs block">
+                Externo
+              </span>
+            </span>
+          );
+        }
+        if (t.destino_desconocido) {
+          return (
+            <span className="text-muted-foreground text-sm italic">
+              Desconocido
+            </span>
+          );
+        }
+        return <span className="text-muted-foreground">—</span>;
+      },
     },
     {
       id: "zona",

@@ -1,1 +1,1 @@
-export { ensureRecolectorPerteneceAlAcopiador } from './recolector-ownership.helper';
+export { ensureMismoDepartamento } from './mismo-departamento.helper';

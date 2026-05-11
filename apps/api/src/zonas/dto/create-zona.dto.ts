@@ -1,4 +1,5 @@
 import {
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -10,6 +11,11 @@ import {
 import { Type } from 'class-transformer';
 
 export class CreateZonaDto {
+  @IsInt()
+  @IsNotEmpty()
+  @Type(() => Number)
+  ciudad_id: number;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)

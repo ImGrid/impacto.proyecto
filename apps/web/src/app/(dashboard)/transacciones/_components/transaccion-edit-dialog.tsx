@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
@@ -14,8 +13,17 @@ import {
 import { useRecolectores } from "@/hooks/use-recolectores";
 import { useSucursales } from "@/hooks/use-sucursales";
 import { useMateriales } from "@/hooks/use-materiales";
+import { useCentrosOperacionales } from "@/hooks/use-centros-operacionales";
+import { useExternos } from "@/hooks/use-externos";
 import type {
+  AcopiadorCompradorExterno,
+  CentroOperacional,
   EditTransaccionAdminInput,
+  Material,
+  PaginatedResponse,
+  Recolector,
+  Sucursal,
+  TransaccionDetalle,
   UnidadMedida,
 } from "@/types/api";
 import { cn } from "@/lib/utils";
@@ -59,6 +67,19 @@ const unidadOptions: { value: UnidadMedida; label: string }[] = [
   { value: "TONELADA", label: "Tonelada" },
 ];
 
+type TipoDestino = "ninguno" | "centro_op" | "externo" | "desconocido";
+
+// Deriva el tipo de destino actual de la transacción a partir de los 3
+// campos polimórficos. Garantizado por CHECK constraint en BD que máximo 1
+// está marcado.
+function deriveTipoDestino(t: TransaccionDetalle | undefined): TipoDestino {
+  if (!t) return "ninguno";
+  if (t.centro_operacional_id != null) return "centro_op";
+  if (t.acopiador_externo_id != null) return "externo";
+  if (t.destino_desconocido) return "desconocido";
+  return "ninguno";
+}
+
 const detalleSchema = z.object({
   material_id: z.string().min(1, "Seleccione un material"),
   cantidad: z
@@ -67,15 +88,20 @@ const detalleSchema = z.object({
     .refine((v) => Number(v) > 0, "La cantidad debe ser mayor a 0"),
   unidad_medida: z.enum(["KG", "UNIDAD", "BOLSA", "TONELADA"]),
   precio_unitario: z.string().optional(),
+  // Sucursal de origen de esta línea (opcional). Permite indicar que el
+  // material provino de un punto específico.
+  sucursal_id: z.string().optional(),
 });
 
 const formSchema = z
   .object({
     observaciones: z.string().max(500, "Máximo 500 caracteres").optional(),
     recolector_id: z.string().optional(),
-    sucursal_id: z.string().optional(),
     fecha: z.date().optional(),
     hora: z.string().optional(),
+    tipo_destino: z.enum(["ninguno", "centro_op", "externo", "desconocido"]),
+    centro_operacional_id: z.string().optional(),
+    acopiador_externo_id: z.string().optional(),
     detalles: z.array(detalleSchema).min(1, "Debe haber al menos un material"),
   })
   .superRefine((data, ctx) => {
@@ -84,6 +110,20 @@ const formSchema = z
         code: "custom",
         path: ["fecha"],
         message: "La fecha no puede ser futura",
+      });
+    }
+    if (data.tipo_destino === "centro_op" && !data.centro_operacional_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["centro_operacional_id"],
+        message: "Seleccione el centro operacional",
+      });
+    }
+    if (data.tipo_destino === "externo" && !data.acopiador_externo_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["acopiador_externo_id"],
+        message: "Seleccione el acopiador/comprador externo",
       });
     }
   });
@@ -96,44 +136,151 @@ interface TransaccionEditDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * Shell del diálogo: controla el open/close y carga la transacción a editar.
+ * El formulario interno (EditForm) sólo se monta cuando TODOS los datos
+ * necesarios están listos. Esto evita el bug en Radix Select donde un
+ * `value` controlado no se aplica si los <SelectItem> aún no se montaron
+ * en el momento del primer render: al inicializar `useForm` ya con los
+ * valores correctos como `defaultValues`, no hace falta `form.reset` y los
+ * Select muestran la opción seleccionada desde el primer render.
+ */
 export function TransaccionEditDialog({
   transaccionId,
   open,
   onOpenChange,
 }: TransaccionEditDialogProps) {
-  const { data: transaccion, isLoading } = useTransaccionDetalle(
-    open ? transaccionId : null,
-  );
-  const editMutation = useEditTransaccionAdmin(transaccionId ?? 0);
-  const [sucursalQuitada, setSucursalQuitada] = useState(false);
-
-  const esPagada = transaccion?.estado === "PAGADO";
-
-  // Recolectores del mismo acopiador actual de la entrega.
+  const { data: transaccion, isLoading: loadingTransaccion } =
+    useTransaccionDetalle(open ? transaccionId : null);
   const { data: recolectoresData } = useRecolectores({
     limit: 100,
     activo: true,
-    acopiador_id: transaccion?.acopiador_id ?? undefined,
   });
   const { data: sucursalesData } = useSucursales({ limit: 100, activo: true });
   const { data: materialesData } = useMateriales({ limit: 100, activo: true });
+  const { data: centrosData } = useCentrosOperacionales({
+    limit: 100,
+    activo: true,
+  });
+  const { data: externosData } = useExternos({ limit: 100, activo: true });
+
+  const ready =
+    transaccion &&
+    recolectoresData &&
+    sucursalesData &&
+    materialesData &&
+    centrosData &&
+    externosData;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Editar entrega{transaccion ? ` #${transaccion.id}` : ""}
+          </DialogTitle>
+          <DialogDescription>
+            {transaccion?.estado === "PAGADO"
+              ? "Esta entrega ya fue pagada. Solo puede editar las observaciones."
+              : "Corrija los campos que necesite. Los cambios se guardan sin afectar el estado del flujo."}
+          </DialogDescription>
+        </DialogHeader>
+
+        {loadingTransaccion || !ready ? (
+          <div className="py-8 text-center text-muted-foreground">
+            Cargando...
+          </div>
+        ) : (
+          <EditForm
+            // El key reinicia el formulario completo cuando se cambia de
+            // transacción mientras el diálogo está abierto.
+            key={transaccion.id}
+            transaccion={transaccion}
+            recolectores={recolectoresData.data}
+            sucursales={sucursalesData.data}
+            materiales={materialesData.data}
+            centros={centrosData.data}
+            externos={externosData.data}
+            onClose={() => onOpenChange(false)}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface EditFormProps {
+  transaccion: TransaccionDetalle;
+  recolectores: Recolector[];
+  sucursales: Sucursal[];
+  materiales: Material[];
+  centros: CentroOperacional[];
+  externos: AcopiadorCompradorExterno[];
+  onClose: () => void;
+}
+
+function EditForm({
+  transaccion,
+  recolectores,
+  sucursales,
+  materiales,
+  centros,
+  externos,
+  onClose,
+}: EditFormProps) {
+  const editMutation = useEditTransaccionAdmin(transaccion.id);
+  const esPagada = transaccion.estado === "PAGADO";
+
+  // Hora: el backend guarda los componentes UTC del momento de creación
+  // (porque la columna BD es `time without time zone` y Prisma serializa el
+  // Date con sufijo Z). Al leer queremos mostrar la hora local del usuario:
+  // si una transacción se registró a las 22:50 hora Bolivia, el usuario
+  // espera ver "22:50" en el form, no "02:50" (UTC).
+  const horaStr = transaccion.hora
+    ? (() => {
+        const d = new Date(transaccion.hora);
+        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      })()
+    : "";
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      observaciones: "",
-      recolector_id: "",
-      sucursal_id: "",
-      fecha: undefined,
-      hora: "",
-      detalles: [
-        {
-          material_id: "",
-          cantidad: "",
-          unidad_medida: "KG" as UnidadMedida,
-          precio_unitario: "",
-        },
-      ],
+      observaciones: transaccion.observaciones ?? "",
+      recolector_id: transaccion.recolector_id
+        ? String(transaccion.recolector_id)
+        : "",
+      fecha: transaccion.fecha ? new Date(transaccion.fecha) : undefined,
+      hora: horaStr,
+      tipo_destino: deriveTipoDestino(transaccion),
+      centro_operacional_id: transaccion.centro_operacional_id
+        ? String(transaccion.centro_operacional_id)
+        : "",
+      acopiador_externo_id: transaccion.acopiador_externo_id
+        ? String(transaccion.acopiador_externo_id)
+        : "",
+      detalles:
+        transaccion.detalle_transaccion.length > 0
+          ? transaccion.detalle_transaccion.map((d) => ({
+              material_id: String(d.material_id),
+              cantidad: String(d.cantidad),
+              unidad_medida: d.unidad_medida as UnidadMedida,
+              precio_unitario:
+                Number(d.precio_unitario) > 0
+                  ? String(d.precio_unitario)
+                  : "",
+              sucursal_id:
+                d.sucursal_id != null ? String(d.sucursal_id) : "",
+            }))
+          : [
+              {
+                material_id: "",
+                cantidad: "",
+                unidad_medida: "KG" as UnidadMedida,
+                precio_unitario: "",
+                sucursal_id: "",
+              },
+            ],
     },
   });
 
@@ -142,54 +289,9 @@ export function TransaccionEditDialog({
     name: "detalles",
   });
 
-  // Precargar cuando llega la transacción. También se reejecuta cuando
-  // llegan los recolectores porque el Select de shadcn no refleja el
-  // `value` si al montar la opción aún no existe en la lista.
-  useEffect(() => {
-    if (open && transaccion && recolectoresData) {
-      setSucursalQuitada(false);
-      // hora: viene como "1970-01-01THH:mm:ss.sssZ" — extraemos HH:mm.
-      const horaDate = transaccion.hora ? new Date(transaccion.hora) : null;
-      const horaStr = horaDate
-        ? `${String(horaDate.getUTCHours()).padStart(2, "0")}:${String(horaDate.getUTCMinutes()).padStart(2, "0")}`
-        : "";
-
-      form.reset({
-        observaciones: transaccion.observaciones ?? "",
-        recolector_id: transaccion.recolector_id
-          ? String(transaccion.recolector_id)
-          : "",
-        sucursal_id: transaccion.sucursal_id
-          ? String(transaccion.sucursal_id)
-          : "",
-        fecha: transaccion.fecha ? new Date(transaccion.fecha) : undefined,
-        hora: horaStr,
-        detalles:
-          transaccion.detalle_transaccion.length > 0
-            ? transaccion.detalle_transaccion.map((d) => ({
-                material_id: String(d.material_id),
-                cantidad: String(d.cantidad),
-                unidad_medida: d.unidad_medida as UnidadMedida,
-                precio_unitario:
-                  Number(d.precio_unitario) > 0
-                    ? String(d.precio_unitario)
-                    : "",
-              }))
-            : [
-                {
-                  material_id: "",
-                  cantidad: "",
-                  unidad_medida: "KG" as UnidadMedida,
-                  precio_unitario: "",
-                },
-              ],
-      });
-    }
-  }, [open, transaccion, recolectoresData, form]);
+  const tipoDestino = form.watch("tipo_destino");
 
   function onSubmit(data: FormValues) {
-    if (!transaccion) return;
-
     const payload: EditTransaccionAdminInput = {};
 
     if ((data.observaciones ?? "") !== (transaccion.observaciones ?? "")) {
@@ -205,13 +307,7 @@ export function TransaccionEditDialog({
         const fechaNueva = format(data.fecha, "yyyy-MM-dd");
         if (fechaNueva !== fechaOriginal) payload.fecha = fechaNueva;
       }
-      const horaOriginal = transaccion.hora
-        ? (() => {
-            const h = new Date(transaccion.hora);
-            return `${String(h.getUTCHours()).padStart(2, "0")}:${String(h.getUTCMinutes()).padStart(2, "0")}`;
-          })()
-        : "";
-      if (data.hora && data.hora !== horaOriginal) payload.hora = data.hora;
+      if (data.hora && data.hora !== horaStr) payload.hora = data.hora;
 
       // Recolector
       const recolectorNuevo = data.recolector_id
@@ -221,17 +317,47 @@ export function TransaccionEditDialog({
         payload.recolector_id = recolectorNuevo;
       }
 
-      // Sucursal: usamos el flag "sucursalQuitada" para distinguir quitar vs no cambiar.
-      const sucursalNueva = data.sucursal_id
-        ? Number(data.sucursal_id)
+      // Destino polimórfico. Solo enviamos cambios si el destino efectivo
+      // difiere del original. Cuando hay cambio, se envían los 3 campos
+      // (el service hace un UPDATE atómico — ver helper validarUnicidadDestino
+      // y comentario "UPDATE atómico" en transacciones.service.ts).
+      const tipoOriginal = deriveTipoDestino(transaccion);
+      const centroNuevoId = data.centro_operacional_id
+        ? Number(data.centro_operacional_id)
         : null;
-      if (sucursalQuitada) {
-        payload.sucursal_id = null;
-      } else if (sucursalNueva && sucursalNueva !== transaccion.sucursal_id) {
-        payload.sucursal_id = sucursalNueva;
+      const externoNuevoId = data.acopiador_externo_id
+        ? Number(data.acopiador_externo_id)
+        : null;
+
+      const destinoCambio =
+        data.tipo_destino !== tipoOriginal ||
+        (data.tipo_destino === "centro_op" &&
+          centroNuevoId !== transaccion.centro_operacional_id) ||
+        (data.tipo_destino === "externo" &&
+          externoNuevoId !== transaccion.acopiador_externo_id);
+
+      if (destinoCambio) {
+        if (data.tipo_destino === "centro_op") {
+          payload.centro_operacional_id = centroNuevoId;
+          payload.acopiador_externo_id = null;
+          payload.destino_desconocido = false;
+        } else if (data.tipo_destino === "externo") {
+          payload.centro_operacional_id = null;
+          payload.acopiador_externo_id = externoNuevoId;
+          payload.destino_desconocido = false;
+        } else if (data.tipo_destino === "desconocido") {
+          payload.centro_operacional_id = null;
+          payload.acopiador_externo_id = null;
+          payload.destino_desconocido = true;
+        } else {
+          // "ninguno" — limpiar los 3.
+          payload.centro_operacional_id = null;
+          payload.acopiador_externo_id = null;
+          payload.destino_desconocido = false;
+        }
       }
 
-      // Detalles
+      // Detalles. Cada uno puede traer su propia `sucursal_id` (opcional).
       payload.detalles = data.detalles.map((d) => ({
         material_id: Number(d.material_id),
         cantidad: Number(d.cantidad),
@@ -239,103 +365,311 @@ export function TransaccionEditDialog({
         precio_unitario: d.precio_unitario
           ? Number(d.precio_unitario)
           : undefined,
+        ...(d.sucursal_id ? { sucursal_id: Number(d.sucursal_id) } : {}),
       }));
     }
 
     if (Object.keys(payload).length === 0) {
-      onOpenChange(false);
+      onClose();
       return;
     }
 
     editMutation.mutate(payload, {
-      onSuccess: () => onOpenChange(false),
+      onSuccess: () => onClose(),
     });
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            Editar entrega{transaccion ? ` #${transaccion.id}` : ""}
-          </DialogTitle>
-          <DialogDescription>
-            {esPagada
-              ? "Esta entrega ya fue pagada. Solo puede editar las observaciones."
-              : "Corrija los campos que necesite. Los cambios se guardan sin afectar el estado del flujo."}
-          </DialogDescription>
-        </DialogHeader>
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        {!esPagada && (
+          <>
+            {/* Recolector */}
+            <FormField
+              control={form.control}
+              name="recolector_id"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Recolector</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value}
+                    disabled={editMutation.isPending}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Seleccionar recolector" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {recolectores.map((r) => (
+                        <SelectItem key={r.id} value={String(r.id)}>
+                          {r.nombre_completo} ({r.cedula_identidad})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    Si el destino es un centro operacional, el recolector
+                    debe pertenecer al mismo departamento.
+                  </p>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
-        {isLoading || !transaccion ? (
-          <div className="py-8 text-center text-muted-foreground">
-            Cargando...
-          </div>
-        ) : (
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              {!esPagada && (
-                <>
-                  {/* Recolector */}
+            {/* Destino polimórfico */}
+            <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+              <FormField
+                control={form.control}
+                name="tipo_destino"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Destino de la entrega</FormLabel>
+                    <Select
+                      onValueChange={(v: TipoDestino) => {
+                        field.onChange(v);
+                        if (v !== "centro_op") {
+                          form.setValue("centro_operacional_id", "");
+                        }
+                        if (v !== "externo") {
+                          form.setValue("acopiador_externo_id", "");
+                        }
+                      }}
+                      value={field.value}
+                      disabled={editMutation.isPending}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="ninguno">
+                          Sin asignar (pendiente)
+                        </SelectItem>
+                        <SelectItem value="centro_op">
+                          Centro operacional
+                        </SelectItem>
+                        <SelectItem value="externo">
+                          Acopiador/comprador externo
+                        </SelectItem>
+                        <SelectItem value="desconocido">Desconocido</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {tipoDestino === "centro_op" && (
+                <FormField
+                  control={form.control}
+                  name="centro_operacional_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Centro operacional</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        disabled={editMutation.isPending}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Seleccionar centro" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {centros.map((c) => (
+                            <SelectItem key={c.id} value={String(c.id)}>
+                              {c.nombre_completo} — {c.nombre_punto}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {tipoDestino === "externo" && (
+                <FormField
+                  control={form.control}
+                  name="acopiador_externo_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Acopiador/comprador externo</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        disabled={editMutation.isPending}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Seleccionar externo" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {externos.map((e) => (
+                            <SelectItem key={e.id} value={String(e.id)}>
+                              {e.nombre}
+                              {e.asociacion ? ` (${e.asociacion})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+            </div>
+
+            {/* Fecha + hora */}
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="fecha"
+                render={({ field }) => (
+                  <FormItem className="flex flex-col">
+                    <FormLabel>Fecha</FormLabel>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              "w-full pl-3 text-left font-normal",
+                              !field.value && "text-muted-foreground",
+                            )}
+                            disabled={editMutation.isPending}
+                          >
+                            {field.value
+                              ? format(field.value, "dd/MM/yyyy")
+                              : "Elegir"}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value}
+                          onSelect={field.onChange}
+                          disabled={(d) => d > new Date()}
+                          locale={es}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="hora"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Hora</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="time"
+                        disabled={editMutation.isPending}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            {/* Materiales */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <FormLabel>Materiales</FormLabel>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    detallesFields.append({
+                      material_id: "",
+                      cantidad: "",
+                      unidad_medida: "KG" as UnidadMedida,
+                      precio_unitario: "",
+                      sucursal_id: "",
+                    })
+                  }
+                  disabled={editMutation.isPending}
+                >
+                  <Plus className="mr-1 h-3 w-3" />
+                  Agregar
+                </Button>
+              </div>
+
+              {detallesFields.fields.map((field, index) => (
+                <div
+                  key={field.id}
+                  className="space-y-2 rounded-md border p-3"
+                >
+                <div className="grid grid-cols-12 items-start gap-2">
                   <FormField
                     control={form.control}
-                    name="recolector_id"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Recolector</FormLabel>
+                    name={`detalles.${index}.material_id`}
+                    render={({ field: selectField }) => (
+                      <FormItem className="col-span-4">
                         <Select
-                          onValueChange={field.onChange}
-                          value={field.value}
+                          onValueChange={selectField.onChange}
+                          value={selectField.value}
                           disabled={editMutation.isPending}
                         >
                           <FormControl>
                             <SelectTrigger className="w-full">
-                              <SelectValue placeholder="Seleccionar recolector" />
+                              <SelectValue placeholder="Material" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {recolectoresData?.data.map((r) => (
-                              <SelectItem key={r.id} value={String(r.id)}>
-                                {r.nombre_completo} ({r.cedula_identidad})
+                            {materiales.map((m) => (
+                              <SelectItem key={m.id} value={String(m.id)}>
+                                {m.nombre}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                        <p className="text-muted-foreground text-xs">
-                          Solo se listan recolectores del mismo acopiador
-                          actual.
-                        </p>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-
-                  {/* Sucursal */}
                   <FormField
                     control={form.control}
-                    name="sucursal_id"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>
-                          Sucursal de origen{" "}
-                          <span className="text-muted-foreground text-xs font-normal">
-                            (opcional)
-                          </span>
-                        </FormLabel>
+                    name={`detalles.${index}.cantidad`}
+                    render={({ field: inputField }) => (
+                      <FormItem className="col-span-2">
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="any"
+                            placeholder="Cant."
+                            disabled={editMutation.isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name={`detalles.${index}.unidad_medida`}
+                    render={({ field: selectField }) => (
+                      <FormItem className="col-span-2">
                         <Select
-                          onValueChange={(v) => {
-                            if (v === "__none__") {
-                              field.onChange("");
-                              setSucursalQuitada(true);
-                            } else {
-                              field.onChange(v);
-                              setSucursalQuitada(false);
-                            }
-                          }}
-                          value={
-                            sucursalQuitada
-                              ? "__none__"
-                              : field.value || "__none__"
-                          }
+                          onValueChange={selectField.onChange}
+                          value={selectField.value}
                           disabled={editMutation.isPending}
                         >
                           <FormControl>
@@ -344,12 +678,9 @@ export function TransaccionEditDialog({
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="__none__">
-                              No especificar
-                            </SelectItem>
-                            {sucursalesData?.data.map((s) => (
-                              <SelectItem key={s.id} value={String(s.id)}>
-                                {s.generador.razon_social} — {s.nombre}
+                            {unidadOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -358,258 +689,125 @@ export function TransaccionEditDialog({
                       </FormItem>
                     )}
                   />
-
-                  {/* Fecha + hora */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="fecha"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-col">
-                          <FormLabel>Fecha</FormLabel>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <FormControl>
-                                <Button
-                                  variant="outline"
-                                  className={cn(
-                                    "w-full pl-3 text-left font-normal",
-                                    !field.value && "text-muted-foreground",
-                                  )}
-                                  disabled={editMutation.isPending}
-                                >
-                                  {field.value
-                                    ? format(field.value, "dd/MM/yyyy")
-                                    : "Elegir"}
-                                  <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                </Button>
-                              </FormControl>
-                            </PopoverTrigger>
-                            <PopoverContent
-                              className="w-auto p-0"
-                              align="start"
-                            >
-                              <Calendar
-                                mode="single"
-                                selected={field.value}
-                                onSelect={field.onChange}
-                                disabled={(d) => d > new Date()}
-                                locale={es}
-                                initialFocus
-                              />
-                            </PopoverContent>
-                          </Popover>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name="hora"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Hora</FormLabel>
-                          <FormControl>
-                            <Input
-                              type="time"
-                              disabled={editMutation.isPending}
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                  <FormField
+                    control={form.control}
+                    name={`detalles.${index}.precio_unitario`}
+                    render={({ field: inputField }) => (
+                      <FormItem className="col-span-3">
+                        <FormControl>
+                          <Input
+                            type="number"
+                            step="any"
+                            placeholder="Precio (Bs)"
+                            disabled={editMutation.isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <div className="col-span-1 flex justify-end pt-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => detallesFields.remove(index)}
+                      disabled={
+                        editMutation.isPending ||
+                        detallesFields.fields.length === 1
+                      }
+                      aria-label="Quitar línea"
+                      title="Quitar línea"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
+                </div>
 
-                  {/* Materiales */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <FormLabel>Materiales</FormLabel>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          detallesFields.append({
-                            material_id: "",
-                            cantidad: "",
-                            unidad_medida: "KG" as UnidadMedida,
-                            precio_unitario: "",
-                          })
+                {/* Origen (sucursal) por línea — opcional. */}
+                <FormField
+                  control={form.control}
+                  name={`detalles.${index}.sucursal_id`}
+                  render={({ field: selectField }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-muted-foreground">
+                        Origen{" "}
+                        <span className="font-normal">(opcional)</span>
+                      </FormLabel>
+                      <Select
+                        onValueChange={(v) =>
+                          selectField.onChange(v === "__none__" ? "" : v)
                         }
+                        value={selectField.value || "__none__"}
                         disabled={editMutation.isPending}
                       >
-                        <Plus className="mr-1 h-3 w-3" />
-                        Agregar
-                      </Button>
-                    </div>
-
-                    {detallesFields.fields.map((field, index) => (
-                      <div
-                        key={field.id}
-                        className="grid grid-cols-12 items-start gap-2 rounded-md border p-3"
-                      >
-                        <FormField
-                          control={form.control}
-                          name={`detalles.${index}.material_id`}
-                          render={({ field: selectField }) => (
-                            <FormItem className="col-span-4">
-                              <Select
-                                onValueChange={selectField.onChange}
-                                value={selectField.value}
-                                disabled={editMutation.isPending}
-                              >
-                                <FormControl>
-                                  <SelectTrigger className="w-full">
-                                    <SelectValue placeholder="Material" />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {materialesData?.data.map((m) => (
-                                    <SelectItem
-                                      key={m.id}
-                                      value={String(m.id)}
-                                    >
-                                      {m.nombre}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name={`detalles.${index}.cantidad`}
-                          render={({ field: inputField }) => (
-                            <FormItem className="col-span-2">
-                              <FormControl>
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  placeholder="Cant."
-                                  disabled={editMutation.isPending}
-                                  {...inputField}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name={`detalles.${index}.unidad_medida`}
-                          render={({ field: selectField }) => (
-                            <FormItem className="col-span-2">
-                              <Select
-                                onValueChange={selectField.onChange}
-                                value={selectField.value}
-                                disabled={editMutation.isPending}
-                              >
-                                <FormControl>
-                                  <SelectTrigger className="w-full">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                </FormControl>
-                                <SelectContent>
-                                  {unidadOptions.map((opt) => (
-                                    <SelectItem
-                                      key={opt.value}
-                                      value={opt.value}
-                                    >
-                                      {opt.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name={`detalles.${index}.precio_unitario`}
-                          render={({ field: inputField }) => (
-                            <FormItem className="col-span-3">
-                              <FormControl>
-                                <Input
-                                  type="number"
-                                  step="any"
-                                  placeholder="Precio (Bs)"
-                                  disabled={editMutation.isPending}
-                                  {...inputField}
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <div className="col-span-1 flex justify-end pt-1">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => detallesFields.remove(index)}
-                            disabled={
-                              editMutation.isPending ||
-                              detallesFields.fields.length === 1
-                            }
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {/* Observaciones — siempre editable */}
-              <FormField
-                control={form.control}
-                name="observaciones"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Observaciones</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        disabled={editMutation.isPending}
-                        rows={2}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => onOpenChange(false)}
-                  disabled={editMutation.isPending}
-                >
-                  Cancelar
-                </Button>
-                <Button type="submit" disabled={editMutation.isPending}>
-                  {editMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Guardando...
-                    </>
-                  ) : (
-                    "Guardar cambios"
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="__none__">
+                            Sin especificar origen
+                          </SelectItem>
+                          {sucursales.map((s) => (
+                            <SelectItem key={s.id} value={String(s.id)}>
+                              {s.generador.razon_social} — {s.nombre}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
                   )}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
+                />
+                </div>
+              ))}
+            </div>
+          </>
         )}
-      </DialogContent>
-    </Dialog>
+
+        {/* Observaciones — siempre editable */}
+        <FormField
+          control={form.control}
+          name="observaciones"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Observaciones</FormLabel>
+              <FormControl>
+                <Textarea
+                  disabled={editMutation.isPending}
+                  rows={2}
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={editMutation.isPending}
+          >
+            Cancelar
+          </Button>
+          <Button type="submit" disabled={editMutation.isPending}>
+            {editMutation.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Guardando...
+              </>
+            ) : (
+              "Guardar cambios"
+            )}
+          </Button>
+        </DialogFooter>
+      </form>
+    </Form>
   );
 }

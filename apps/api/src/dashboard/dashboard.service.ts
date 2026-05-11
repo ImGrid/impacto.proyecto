@@ -21,13 +21,42 @@ import { EstadisticasQueryDto } from './dto';
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getDashboard() {
+  /**
+   * Devuelve el fragmento `where` que filtra transacciones por el
+   * departamento activo del admin. Como una transacción no tiene
+   * `departamento_id` directo, se infiere por el recolector (si lo hay)
+   * o por la sucursal asignada en alguno de sus detalles (caso GENERADO
+   * o entregas con origen identificado en algún detalle).
+   *
+   * Si `departamentoActivo` es null (admin sin selección, escenario edge
+   * no esperado en producción), no aplica filtro.
+   */
+  private scopeDepartamento(
+    departamentoActivo: number | null,
+  ): Prisma.transaccionWhereInput {
+    if (departamentoActivo == null) return {};
+    return {
+      OR: [
+        { recolector: { departamento_id: departamentoActivo } },
+        {
+          detalle_transaccion: {
+            some: { sucursal: { departamento_id: departamentoActivo } },
+          },
+        },
+      ],
+    };
+  }
+
+  async getDashboard(departamentoActivo: number | null) {
     const now = new Date();
     const { mesActualDesde, mesActualHasta, mesPrevDesde, mesPrevHasta } =
       this.rangosMes(now);
 
     // 6 meses incluyendo el actual (de más antiguo a más nuevo)
     const seisMesesDesde = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+    // Fragmento que scope-a transacciones al depto activo del admin.
+    const scope = this.scopeDepartamento(departamentoActivo);
 
     const [
       transMesActual,
@@ -39,6 +68,7 @@ export class DashboardService {
       // Entregas del mes actual: solo las que ya tienen precio (ENTREGADO/PAGADO).
       this.prisma.transaccion.findMany({
         where: {
+          ...scope,
           estado: { in: ['ENTREGADO', 'PAGADO'] },
           fecha: { gte: mesActualDesde, lte: mesActualHasta },
         },
@@ -47,6 +77,7 @@ export class DashboardService {
       // Mes anterior: mismo filtro.
       this.prisma.transaccion.findMany({
         where: {
+          ...scope,
           estado: { in: ['ENTREGADO', 'PAGADO'] },
           fecha: { gte: mesPrevDesde, lte: mesPrevHasta },
         },
@@ -55,6 +86,7 @@ export class DashboardService {
       // Serie 6 meses: todas las ENTREGADO/PAGADO.
       this.prisma.transaccion.findMany({
         where: {
+          ...scope,
           estado: { in: ['ENTREGADO', 'PAGADO'] },
           fecha: { gte: seisMesesDesde, lte: mesActualHasta },
         },
@@ -67,6 +99,7 @@ export class DashboardService {
       // Entregas ENTREGADO sin pago vinculado: deuda pendiente.
       this.prisma.transaccion.findMany({
         where: {
+          ...scope,
           estado: 'ENTREGADO',
           pago_transaccion: null,
         },
@@ -74,7 +107,7 @@ export class DashboardService {
       }),
       // Entregas RECOLECTADO: esperando que el acopiador verifique.
       this.prisma.transaccion.count({
-        where: { estado: 'RECOLECTADO' },
+        where: { ...scope, estado: 'RECOLECTADO' },
       }),
     ]);
 
@@ -116,17 +149,21 @@ export class DashboardService {
           material: {
             select: { id: true, nombre: true, factor_co2: true },
           },
+          // Sucursal a nivel línea (cambio 2.6): cada detalle puede traer
+          // una sucursal distinta. El ranking de sucursales agrupa por
+          // `detalle.sucursal` recorriendo los detalles, no por una sola
+          // sucursal de cabecera (que ya no existe).
+          sucursal: {
+            select: {
+              id: true,
+              nombre: true,
+              generador: { select: { razon_social: true } },
+            },
+          },
         },
       },
       recolector: {
         select: { id: true, nombre_completo: true },
-      },
-      sucursal: {
-        select: {
-          id: true,
-          nombre: true,
-          generador: { select: { razon_social: true } },
-        },
       },
     } satisfies Prisma.transaccionInclude;
   }
@@ -308,16 +345,22 @@ export class DashboardService {
       .slice(0, limit);
   }
 
+  /**
+   * Ranking de sucursales por kg aportados (cambio 2.6).
+   * Con la sucursal viviendo a nivel de detalle, cada línea aporta a la
+   * sucursal indicada en ella (si no tiene, no aporta a nadie). Por eso
+   * iteramos los detalles, no las transacciones.
+   */
   private topSucursales(
     transacciones: Array<{
-      sucursal: {
-        id: number;
-        nombre: string;
-        generador: { razon_social: string };
-      } | null;
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
+        sucursal: {
+          id: number;
+          nombre: string;
+          generador: { razon_social: string };
+        } | null;
       }>;
     }>,
     limit: number,
@@ -327,17 +370,18 @@ export class DashboardService {
       { id: number; nombre: string; generador: string; kg: number }
     >();
     for (const t of transacciones) {
-      if (!t.sucursal) continue;
-      const acc = map.get(t.sucursal.id) ?? {
-        id: t.sucursal.id,
-        nombre: t.sucursal.nombre,
-        generador: t.sucursal.generador.razon_social,
-        kg: 0,
-      };
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida === 'KG') acc.kg += Number(d.cantidad);
+        if (!d.sucursal) continue;
+        if (d.unidad_medida !== 'KG') continue;
+        const acc = map.get(d.sucursal.id) ?? {
+          id: d.sucursal.id,
+          nombre: d.sucursal.nombre,
+          generador: d.sucursal.generador.razon_social,
+          kg: 0,
+        };
+        acc.kg += Number(d.cantidad);
+        map.set(d.sucursal.id, acc);
       }
-      map.set(t.sucursal.id, acc);
     }
     return Array.from(map.values())
       .map((x) => ({ ...x, kg: this.round(x.kg, 2) }))
@@ -362,7 +406,10 @@ export class DashboardService {
    * previo es 2-31 mar. Esto es más útil que "mes anterior" cuando el
    * usuario elige cualquier rango.
    */
-  async getEstadisticas(query: EstadisticasQueryDto) {
+  async getEstadisticas(
+    query: EstadisticasQueryDto,
+    departamentoActivo: number | null,
+  ) {
     // Defaults: últimos 30 días terminando hoy.
     const hoy = new Date();
     const hasta = query.hasta
@@ -382,7 +429,11 @@ export class DashboardService {
     const prevHasta = new Date(desde.getTime() - 1);
     const prevDesde = new Date(prevHasta.getTime() - duracionMs);
 
+    // Fragmento que scope-a transacciones al depto activo del admin.
+    const scope = this.scopeDepartamento(departamentoActivo);
+
     const whereBase: Prisma.transaccionWhereInput = {
+      ...scope,
       estado: { in: ['ENTREGADO', 'PAGADO'] },
     };
     if (query.zona_id) whereBase.zona_id = query.zona_id;
@@ -459,17 +510,20 @@ export class DashboardService {
           material: {
             select: { id: true, nombre: true, factor_co2: true },
           },
+          // Sucursal a nivel línea (cambio 2.6). El ranking de sucursales
+          // suma kg por sucursal recorriendo los detalles, no por una sola
+          // sucursal de cabecera.
+          sucursal: {
+            select: {
+              id: true,
+              nombre: true,
+              generador: { select: { razon_social: true } },
+            },
+          },
         },
       },
       recolector: {
         select: { id: true, nombre_completo: true, cedula_identidad: true },
-      },
-      sucursal: {
-        select: {
-          id: true,
-          nombre: true,
-          generador: { select: { razon_social: true } },
-        },
       },
     } satisfies Prisma.transaccionInclude;
   }
@@ -578,19 +632,25 @@ export class DashboardService {
       .sort((a, b) => b.kg - a.kg);
   }
 
-  /** Ranking completo de sucursales del período. */
+  /**
+   * Ranking completo de sucursales del período (cambio 2.6).
+   * Como la sucursal vive por línea de detalle, sumamos kg y Bs por
+   * sucursal recorriendo los detalles que tengan sucursal asignada. El
+   * monto Bs de cada sucursal es la suma de los subtotales de los detalles
+   * que vinieron de ella.
+   */
   private rankingSucursales(
     transacciones: Array<{
-      sucursal: {
-        id: number;
-        nombre: string;
-        generador: { razon_social: string };
-      } | null;
-      monto_total: Prisma.Decimal;
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
         material_id: number;
+        subtotal: Prisma.Decimal;
+        sucursal: {
+          id: number;
+          nombre: string;
+          generador: { razon_social: string };
+        } | null;
       }>;
     }>,
     materialFiltro?: number,
@@ -606,21 +666,20 @@ export class DashboardService {
       }
     >();
     for (const t of transacciones) {
-      if (!t.sucursal) continue;
-      const acc = map.get(t.sucursal.id) ?? {
-        id: t.sucursal.id,
-        nombre: t.sucursal.nombre,
-        generador: t.sucursal.generador.razon_social,
-        kg: 0,
-        bs: 0,
-      };
-      acc.bs += Number(t.monto_total);
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida !== 'KG') continue;
+        if (!d.sucursal) continue;
         if (materialFiltro && d.material_id !== materialFiltro) continue;
-        acc.kg += Number(d.cantidad);
+        const acc = map.get(d.sucursal.id) ?? {
+          id: d.sucursal.id,
+          nombre: d.sucursal.nombre,
+          generador: d.sucursal.generador.razon_social,
+          kg: 0,
+          bs: 0,
+        };
+        if (d.unidad_medida === 'KG') acc.kg += Number(d.cantidad);
+        acc.bs += Number(d.subtotal);
+        map.set(d.sucursal.id, acc);
       }
-      map.set(t.sucursal.id, acc);
     }
     return Array.from(map.values())
       .map((x) => ({ ...x, kg: this.round(x.kg, 2), bs: this.round(x.bs, 2) }))

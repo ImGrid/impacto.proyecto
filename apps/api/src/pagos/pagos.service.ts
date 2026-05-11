@@ -7,12 +7,14 @@ import {
 import { Prisma, rol_usuario } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
-import { ensureRecolectorPerteneceAlAcopiador } from '../common/auth';
+import { ensureMismoDepartamento } from '../common/auth';
 import { CreatePagoDto, PagoQueryDto } from './dto';
 
 const pagoInclude = {
   recolector: { select: { id: true, nombre_completo: true, cedula_identidad: true } },
-  acopiador: { select: { id: true, nombre_completo: true, nombre_punto: true } },
+  centro_operacional: {
+    select: { id: true, nombre_completo: true, nombre_punto: true },
+  },
   pago_transaccion: {
     include: {
       transaccion: {
@@ -36,28 +38,29 @@ export class PagosService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Registrar un pago. Solo el acopiador puede crear pagos.
-   * Valida que todas las transacciones estén en ENTREGADO, pertenezcan
-   * al recolector indicado y al acopiador logueado, y no tengan pago previo.
+   * Registrar un pago. Solo el centro operacional (rol ACOPIADOR) puede crear pagos.
+   * Valida que todas las transacciones estén en ENTREGADO con destino =
+   * este centro op, pertenezcan al recolector indicado y no tengan pago previo.
+   *
+   * Solo se pueden pagar transacciones cuyo destino sea este centro operacional.
+   * Transacciones a acopiador/comprador externo o desconocido NO se pueden pagar
+   * en el sistema (se quedan en ENTREGADO indefinidamente).
    */
   async create(dto: CreatePagoDto, userId: number) {
     return this.prisma.$transaction(async (tx) => {
-      // 1. Obtener el acopiador logueado
-      const acopiador = await tx.acopiador.findFirst({
+      // 1. Obtener el centro operacional logueado
+      const centro = await tx.centro_operacional.findFirst({
         where: { usuario_id: userId },
       });
-      if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
+      if (!centro) {
+        throw new ForbiddenException('Centro operacional no encontrado');
+      }
 
-      // 2. Verificar que el recolector existe Y pertenece al acopiador.
-      // Defensa en profundidad: aunque las validaciones por transacción
-      // de abajo (acopiador_id de cada t === acopiador.id) ya bloquean
-      // pagos a transacciones ajenas, este check evita que datos podridos
-      // creados antes del fix del IDOR en transacciones se puedan pagar.
-      await ensureRecolectorPerteneceAlAcopiador(
-        tx,
-        dto.recolector_id,
-        acopiador.id,
-      );
+      // 2. Verificar que el recolector existe y comparte departamento con
+      // este centro operacional. Defensa en profundidad: aunque las
+      // validaciones por transacción de abajo bloquean pagos a transacciones
+      // ajenas, este check evita pagos con datos cross-departamento.
+      await ensureMismoDepartamento(tx, dto.recolector_id, centro.id);
 
       // 3. Obtener todas las transacciones solicitadas
       const transacciones = await tx.transaccion.findMany({
@@ -88,7 +91,7 @@ export class PagosService {
           );
         }
 
-        if (t.acopiador_id !== acopiador.id) {
+        if (t.centro_operacional_id !== centro.id) {
           throw new ForbiddenException(
             `La entrega #${t.id} no le pertenece`,
           );
@@ -111,7 +114,7 @@ export class PagosService {
       const pago = await tx.pago.create({
         data: {
           recolector_id: dto.recolector_id,
-          acopiador_id: acopiador.id,
+          centro_operacional_id: centro.id,
           monto_total: montoTotal,
           fecha_pago: new Date(),
           observaciones: dto.observaciones,
@@ -151,28 +154,40 @@ export class PagosService {
   /**
    * Listar pagos con filtros. Filtra automáticamente por rol.
    */
-  async findAll(query: PagoQueryDto, userId: number, userRol: rol_usuario) {
+  async findAll(
+    query: PagoQueryDto,
+    userId: number,
+    userRol: rol_usuario,
+    departamentoActivo: number | null,
+  ) {
     const where: Prisma.pagoWhereInput = {};
 
     // Filtro por rol
     if (userRol === 'ACOPIADOR') {
-      const acopiador = await this.prisma.acopiador.findFirst({
+      const centro = await this.prisma.centro_operacional.findFirst({
         where: { usuario_id: userId },
       });
-      if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
-      where.acopiador_id = acopiador.id;
+      if (!centro) {
+        throw new ForbiddenException('Centro operacional no encontrado');
+      }
+      where.centro_operacional_id = centro.id;
     } else if (userRol === 'RECOLECTOR') {
       const recolector = await this.prisma.recolector.findFirst({
         where: { usuario_id: userId },
       });
       if (!recolector) throw new ForbiddenException('Recolector no encontrado');
       where.recolector_id = recolector.id;
+    } else if (userRol === 'ADMIN' && departamentoActivo != null) {
+      // Filtro global por depto activo: el pago vive en el depto de su centro op.
+      where.centro_operacional = { departamento_id: departamentoActivo };
     }
 
-    // Filtros opcionales (solo ADMIN puede filtrar por recolector/acopiador arbitrarios)
+    // Filtros opcionales (solo ADMIN puede filtrar por recolector/centro arbitrarios)
     if (userRol === 'ADMIN') {
       if (query.recolector_id) where.recolector_id = query.recolector_id;
-      if (query.acopiador_id) where.acopiador_id = query.acopiador_id;
+      if (query.centro_operacional_id) {
+        where.centro_operacional_id = query.centro_operacional_id;
+      }
     }
 
     if (query.fecha_desde || query.fecha_hasta) {
@@ -189,7 +204,7 @@ export class PagosService {
         orderBy: { fecha_creacion: 'desc' },
         include: {
           recolector: { select: { id: true, nombre_completo: true } },
-          acopiador: { select: { id: true, nombre_completo: true } },
+          centro_operacional: { select: { id: true, nombre_completo: true } },
           pago_transaccion: {
             select: { transaccion_id: true },
           },
@@ -204,7 +219,12 @@ export class PagosService {
   /**
    * Detalle de un pago con transacciones vinculadas.
    */
-  async findOne(id: number, userId: number, userRol: rol_usuario) {
+  async findOne(
+    id: number,
+    userId: number,
+    userRol: rol_usuario,
+    departamentoActivo: number | null,
+  ) {
     const pago = await this.prisma.pago.findUnique({
       where: { id },
       include: pagoInclude,
@@ -214,10 +234,10 @@ export class PagosService {
 
     // Validar acceso por rol
     if (userRol === 'ACOPIADOR') {
-      const acopiador = await this.prisma.acopiador.findFirst({
+      const centro = await this.prisma.centro_operacional.findFirst({
         where: { usuario_id: userId },
       });
-      if (pago.acopiador_id !== acopiador?.id) {
+      if (pago.centro_operacional_id !== centro?.id) {
         throw new ForbiddenException('No tiene acceso a este pago');
       }
     } else if (userRol === 'RECOLECTOR') {
@@ -227,6 +247,15 @@ export class PagosService {
       if (pago.recolector_id !== recolector?.id) {
         throw new ForbiddenException('No tiene acceso a este pago');
       }
+    } else if (userRol === 'ADMIN' && departamentoActivo != null) {
+      // Filtro global: el pago debe pertenecer al depto activo (vía centro op).
+      const centro = await this.prisma.centro_operacional.findUnique({
+        where: { id: pago.centro_operacional_id },
+        select: { departamento_id: true },
+      });
+      if (centro?.departamento_id !== departamentoActivo) {
+        throw new NotFoundException('Pago no encontrado');
+      }
     }
 
     return pago;
@@ -234,26 +263,29 @@ export class PagosService {
 
   /**
    * Transacciones pendientes de pago para un recolector específico.
-   * Solo el acopiador puede consultar esto.
+   * Solo el centro operacional puede consultar esto.
    */
   async findPendientes(recolectorId: number, userId: number) {
-    const acopiador = await this.prisma.acopiador.findFirst({
+    const centro = await this.prisma.centro_operacional.findFirst({
       where: { usuario_id: userId },
     });
-    if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
+    if (!centro) {
+      throw new ForbiddenException('Centro operacional no encontrado');
+    }
 
-    // Verificar que el recolector existe y pertenece a este acopiador.
-    // El helper devuelve el recolector si todo va bien, evitando un SELECT extra.
-    const recolector = await ensureRecolectorPerteneceAlAcopiador(
+    // Verificar que el recolector existe y comparte departamento con
+    // este centro operacional. El helper devuelve el recolector si todo
+    // va bien, evitando un SELECT extra.
+    const recolector = await ensureMismoDepartamento(
       this.prisma,
       recolectorId,
-      acopiador.id,
+      centro.id,
     );
 
     const transacciones = await this.prisma.transaccion.findMany({
       where: {
         recolector_id: recolectorId,
-        acopiador_id: acopiador.id,
+        centro_operacional_id: centro.id,
         estado: 'ENTREGADO',
         pago_transaccion: null,
       },

@@ -15,7 +15,7 @@ export default async function DashboardLayout({
     <SidebarProvider>
       <AppSidebar userIdentificador={session.identificador} />
       <SidebarInset>
-        <TopBar />
+        <TopBar departamentoActivo={session.departamento_activo} />
         <div className="flex-1 p-6">{children}</div>
       </SidebarInset>
     </SidebarProvider>

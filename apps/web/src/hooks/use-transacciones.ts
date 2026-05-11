@@ -31,13 +31,25 @@ type UseTransaccionesParams = {
   estado?: EstadoTransaccion;
   zona_id?: number;
   recolector_id?: number;
-  acopiador_id?: number;
+  // Filtros por destino polimórfico (admin). Solo uno tiene sentido a la vez.
+  centro_operacional_id?: number;
+  acopiador_externo_id?: number;
   fecha_desde?: string;
   fecha_hasta?: string;
 };
 
 export function useTransacciones(params: UseTransaccionesParams = {}) {
-  const { page = 1, limit = 10, estado, zona_id, recolector_id, acopiador_id, fecha_desde, fecha_hasta } = params;
+  const {
+    page = 1,
+    limit = 10,
+    estado,
+    zona_id,
+    recolector_id,
+    centro_operacional_id,
+    acopiador_externo_id,
+    fecha_desde,
+    fecha_hasta,
+  } = params;
 
   const searchParams = new URLSearchParams();
   searchParams.set("page", String(page));
@@ -45,12 +57,25 @@ export function useTransacciones(params: UseTransaccionesParams = {}) {
   if (estado) searchParams.set("estado", estado);
   if (zona_id) searchParams.set("zona_id", String(zona_id));
   if (recolector_id) searchParams.set("recolector_id", String(recolector_id));
-  if (acopiador_id) searchParams.set("acopiador_id", String(acopiador_id));
+  if (centro_operacional_id)
+    searchParams.set("centro_operacional_id", String(centro_operacional_id));
+  if (acopiador_externo_id)
+    searchParams.set("acopiador_externo_id", String(acopiador_externo_id));
   if (fecha_desde) searchParams.set("fecha_desde", fecha_desde);
   if (fecha_hasta) searchParams.set("fecha_hasta", fecha_hasta);
 
   return useQuery({
-    queryKey: transaccionesKeys.list({ page, limit, estado, zona_id, recolector_id, acopiador_id, fecha_desde, fecha_hasta }),
+    queryKey: transaccionesKeys.list({
+      page,
+      limit,
+      estado,
+      zona_id,
+      recolector_id,
+      centro_operacional_id,
+      acopiador_externo_id,
+      fecha_desde,
+      fecha_hasta,
+    }),
     queryFn: () =>
       clientGet<PaginatedResponse<Transaccion>>(
         `/transacciones?${searchParams.toString()}`,

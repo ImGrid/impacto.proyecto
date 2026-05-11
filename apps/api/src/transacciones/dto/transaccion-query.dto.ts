@@ -20,7 +20,12 @@ export class TransaccionQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
-  acopiador_id?: number;
+  centro_operacional_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  acopiador_externo_id?: number;
 
   @IsOptional()
   @IsInt()

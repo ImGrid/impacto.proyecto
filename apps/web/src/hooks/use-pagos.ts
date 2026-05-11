@@ -16,24 +16,39 @@ type UsePagosParams = {
   page?: number;
   limit?: number;
   recolector_id?: number;
-  acopiador_id?: number;
+  centro_operacional_id?: number;
   fecha_desde?: string;
   fecha_hasta?: string;
 };
 
 export function usePagos(params: UsePagosParams = {}) {
-  const { page = 1, limit = 10, recolector_id, acopiador_id, fecha_desde, fecha_hasta } = params;
+  const {
+    page = 1,
+    limit = 10,
+    recolector_id,
+    centro_operacional_id,
+    fecha_desde,
+    fecha_hasta,
+  } = params;
 
   const searchParams = new URLSearchParams();
   searchParams.set("page", String(page));
   searchParams.set("limit", String(limit));
   if (recolector_id) searchParams.set("recolector_id", String(recolector_id));
-  if (acopiador_id) searchParams.set("acopiador_id", String(acopiador_id));
+  if (centro_operacional_id)
+    searchParams.set("centro_operacional_id", String(centro_operacional_id));
   if (fecha_desde) searchParams.set("fecha_desde", fecha_desde);
   if (fecha_hasta) searchParams.set("fecha_hasta", fecha_hasta);
 
   return useQuery({
-    queryKey: pagosKeys.list({ page, limit, recolector_id, acopiador_id, fecha_desde, fecha_hasta }),
+    queryKey: pagosKeys.list({
+      page,
+      limit,
+      recolector_id,
+      centro_operacional_id,
+      fecha_desde,
+      fecha_hasta,
+    }),
     queryFn: () =>
       clientGet<PaginatedResponse<Pago>>(
         `/pagos?${searchParams.toString()}`,

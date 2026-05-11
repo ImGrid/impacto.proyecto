@@ -1,0 +1,78 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  ParseIntPipe,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { rol_usuario } from '@prisma/client';
+import { CurrentUser, Roles } from '../auth/decorators';
+import { CentrosOperacionalesService } from './centros-operacionales.service';
+import {
+  CreateCentroOperacionalDto,
+  UpdateCentroOperacionalDto,
+  CentroOperacionalQueryDto,
+} from './dto';
+
+@Controller('centros-operacionales')
+@Roles(rol_usuario.ADMIN)
+export class CentrosOperacionalesController {
+  constructor(
+    private readonly centrosOperacionalesService: CentrosOperacionalesService,
+  ) {}
+
+  @Post()
+  create(
+    @Body() dto: CreateCentroOperacionalDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.centrosOperacionalesService.create(dto, departamentoActivo);
+  }
+
+  @Get()
+  findAll(
+    @Query() query: CentroOperacionalQueryDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.centrosOperacionalesService.findAll(query, departamentoActivo);
+  }
+
+  @Get('mapa')
+  findAllForMap(
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.centrosOperacionalesService.findAllForMap(departamentoActivo);
+  }
+
+  @Get(':id')
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.centrosOperacionalesService.findOne(id, departamentoActivo);
+  }
+
+  @Patch(':id')
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateCentroOperacionalDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.centrosOperacionalesService.update(id, dto, departamentoActivo);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.centrosOperacionalesService.hardDelete(id, departamentoActivo);
+  }
+}

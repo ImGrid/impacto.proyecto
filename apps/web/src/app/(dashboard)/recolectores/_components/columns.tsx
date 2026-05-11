@@ -43,14 +43,14 @@ export const columns: ColumnDef<Recolector>[] = [
     cell: ({ row }) => row.original.usuario.email || "—",
   },
   {
-    id: "acopiador",
-    header: "Acopiador",
-    cell: ({ row }) => row.original.acopiador.nombre_completo,
-  },
-  {
     id: "zona",
     header: "Zona",
     cell: ({ row }) => row.original.zona.nombre,
+  },
+  {
+    id: "departamento",
+    header: "Departamento",
+    cell: ({ row }) => row.original.departamento.nombre,
   },
   {
     id: "dias",

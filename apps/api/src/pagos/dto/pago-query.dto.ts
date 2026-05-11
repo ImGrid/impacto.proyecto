@@ -11,7 +11,7 @@ export class PagoQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
-  acopiador_id?: number;
+  centro_operacional_id?: number;
 
   @IsOptional()
   @IsString()

@@ -13,7 +13,7 @@ export const columns: ColumnDef<Zona>[] = [
   },
   {
     accessorKey: "descripcion",
-    header: "Descripcion",
+    header: "Descripción",
     cell: ({ row }) => {
       const descripcion = row.getValue<string | null>("descripcion");
       if (!descripcion) return <span className="text-muted-foreground">—</span>;
@@ -26,11 +26,11 @@ export const columns: ColumnDef<Zona>[] = [
   },
   {
     id: "ubicacion",
-    header: "Ubicacion",
+    header: "Ubicación",
     cell: ({ row }) => {
       const zona = row.original;
       if (zona.latitud == null || zona.longitud == null) {
-        return <span className="text-muted-foreground text-xs">Sin ubicacion</span>;
+        return <span className="text-muted-foreground text-xs">Sin ubicación</span>;
       }
       return (
         <div className="flex items-center gap-1.5 text-xs">

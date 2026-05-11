@@ -12,7 +12,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
-import { Roles } from '../auth/decorators';
+import { CurrentUser, Roles } from '../auth/decorators';
 import { RecolectoresService } from './recolectores.service';
 import {
   CreateRecolectorDto,
@@ -26,39 +26,54 @@ export class RecolectoresController {
   constructor(private readonly recolectoresService: RecolectoresService) {}
 
   @Post()
-  create(@Body() dto: CreateRecolectorDto) {
-    return this.recolectoresService.create(dto);
+  create(
+    @Body() dto: CreateRecolectorDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.recolectoresService.create(dto, departamentoActivo);
   }
 
   @Get()
   @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR)
-  findAll(@Query() query: RecolectorQueryDto) {
-    return this.recolectoresService.findAll(query);
+  findAll(
+    @Query() query: RecolectorQueryDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.recolectoresService.findAll(query, departamentoActivo);
   }
 
   @Get('mapa')
   @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR)
-  findAllForMap() {
-    return this.recolectoresService.findAllForMap();
+  findAllForMap(
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.recolectoresService.findAllForMap(departamentoActivo);
   }
 
   @Get(':id')
   @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR)
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.recolectoresService.findOne(id);
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.recolectoresService.findOne(id, departamentoActivo);
   }
 
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateRecolectorDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.recolectoresService.update(id, dto);
+    return this.recolectoresService.update(id, dto, departamentoActivo);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.recolectoresService.hardDelete(id);
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.recolectoresService.hardDelete(id, departamentoActivo);
   }
 }

@@ -65,8 +65,10 @@ export function PagoDetailDialog({
                 <p className="font-medium">{pago.recolector.nombre_completo}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">Acopiador</p>
-                <p className="font-medium">{pago.acopiador.nombre_completo}</p>
+                <p className="text-muted-foreground">Centro operacional</p>
+                <p className="font-medium">
+                  {pago.centro_operacional.nombre_completo}
+                </p>
               </div>
               {pago.observaciones && (
                 <div className="col-span-2">

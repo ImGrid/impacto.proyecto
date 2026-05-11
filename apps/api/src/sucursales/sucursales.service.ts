@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ForbiddenException,
@@ -34,6 +35,9 @@ const sucursalInclude = {
   zona: {
     select: { id: true, nombre: true },
   },
+  departamento: {
+    select: { id: true, nombre: true },
+  },
   sucursal_material: {
     include: { material: { select: { id: true, nombre: true } } },
   },
@@ -47,12 +51,39 @@ const sucursalInclude = {
 export class SucursalesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(dto: CreateSucursalDto) {
+  async create(
+    dto: CreateSucursalDto,
+    departamentoActivo: number | null,
+  ) {
     const { materiales, horarios, ...sucursalData } = dto;
 
     return this.prisma.$transaction(async (tx) => {
+      // Inferir departamento_id desde la zona (zona -> ciudad -> departamento)
+      // para garantizar coherencia. Evita que el cliente envíe combinaciones
+      // zona+depto inconsistentes.
+      const zona = await tx.zona.findUnique({
+        where: { id: sucursalData.zona_id },
+        select: { ciudad: { select: { departamento_id: true } } },
+      });
+      if (!zona) throw new NotFoundException('Zona no encontrada');
+
+      // Filtro global por depto activo: la sucursal debe crearse en el depto
+      // activo del admin (a través de la zona). Evita que un admin scoped a
+      // depto 2 cree sucursales en depto 1 inadvertidamente.
+      if (
+        departamentoActivo != null &&
+        zona.ciudad.departamento_id !== departamentoActivo
+      ) {
+        throw new BadRequestException(
+          'La sucursal debe pertenecer al departamento activo de la sesión',
+        );
+      }
+
       const sucursal = await tx.sucursal.create({
-        data: sucursalData,
+        data: {
+          ...sucursalData,
+          departamento_id: zona.ciudad.departamento_id,
+        },
       });
 
       if (materiales?.length) {
@@ -82,11 +113,14 @@ export class SucursalesService {
     query: SucursalQueryDto,
     userId?: number,
     userRol?: rol_usuario,
+    departamentoActivo?: number | null,
   ) {
-    // Derivar/validar zona según el rol para evitar IDOR. ADMIN y GENERADOR
-    // mantienen el comportamiento anterior (el GENERADOR ya se filtra
-    // naturalmente por generador_id en sus consultas).
+    // Derivar/validar zona o departamento según el rol para evitar IDOR.
+    // ADMIN aplica filtro por departamento_activo. GENERADOR no aplica filtro
+    // de depto (es entidad global y sus sucursales pueden estar en cualquier
+    // depto). RECOLECTOR se restringe a su zona. ACOPIADOR a su depto.
     let zonaIdFiltro = query.zona_id;
+    let departamentoIdFiltro: number | undefined;
 
     if (userRol === 'RECOLECTOR' && userId != null) {
       const recolector = await this.prisma.recolector.findFirst({
@@ -101,35 +135,39 @@ export class SucursalesService {
       }
       zonaIdFiltro = recolector.zona_id;
     } else if (userRol === 'ACOPIADOR' && userId != null) {
-      const acopiador = await this.prisma.acopiador.findFirst({
+      // El centro operacional ve sucursales de SU DEPARTAMENTO (sin importar
+      // la zona). Si manda zona_id, se valida que esa zona pertenezca al
+      // mismo departamento.
+      const centro = await this.prisma.centro_operacional.findFirst({
         where: { usuario_id: userId },
-        select: { id: true, zona_id: true },
+        select: { departamento_id: true },
       });
-      if (!acopiador) throw new ForbiddenException('Acopiador no encontrado');
+      if (!centro) {
+        throw new ForbiddenException('Centro operacional no encontrado');
+      }
 
-      if (query.zona_id == null) {
-        // Sin zona explícita: por defecto su propia zona.
-        zonaIdFiltro = acopiador.zona_id;
-      } else if (query.zona_id !== acopiador.zona_id) {
-        // Puede consultar otras zonas solo si tiene al menos un recolector
-        // asignado ahí (caso acopiador móvil con recolectores en zonas
-        // distintas a la suya).
-        const recolectorEnZona = await this.prisma.recolector.findFirst({
-          where: { acopiador_id: acopiador.id, zona_id: query.zona_id },
-          select: { id: true },
+      if (query.zona_id != null) {
+        const zona = await this.prisma.zona.findUnique({
+          where: { id: query.zona_id },
+          select: { ciudad: { select: { departamento_id: true } } },
         });
-        if (!recolectorEnZona) {
+        if (!zona || zona.ciudad.departamento_id !== centro.departamento_id) {
           throw new ForbiddenException(
-            'No tiene recolectores asignados en esa zona',
+            'No puede consultar sucursales de departamentos distintos al suyo',
           );
         }
       }
+      departamentoIdFiltro = centro.departamento_id;
+    } else if (userRol === 'ADMIN' && departamentoActivo != null) {
+      // Filtro global por depto activo del admin.
+      departamentoIdFiltro = departamentoActivo;
     }
 
     const where: Prisma.sucursalWhereInput = {
       activo: query.activo,
       generador_id: query.generador_id,
       zona_id: zonaIdFiltro,
+      departamento_id: departamentoIdFiltro,
       frecuencia: query.frecuencia,
       ...(query.search
         ? { nombre: { contains: query.search, mode: 'insensitive' as const } }
@@ -150,18 +188,38 @@ export class SucursalesService {
     return new PaginatedResponseDto(data, total, query.page, query.limit);
   }
 
-  async findOne(id: number) {
+  async findOne(
+    id: number,
+    departamentoActivo: number | null,
+    userRol?: rol_usuario,
+  ) {
     const sucursal = await this.prisma.sucursal.findUnique({
       where: { id },
       include: sucursalInclude,
     });
 
     if (!sucursal) throw new NotFoundException('Sucursal no encontrada');
+
+    // Filtro global por depto activo. Aplica al ADMIN. El GENERADOR puede
+    // tener sucursales en cualquier depto (entidad global), así que no se
+    // le aplica el filtro.
+    if (
+      userRol === 'ADMIN' &&
+      departamentoActivo != null &&
+      sucursal.departamento_id !== departamentoActivo
+    ) {
+      throw new NotFoundException('Sucursal no encontrada');
+    }
+
     return sucursal;
   }
 
-  async update(id: number, dto: UpdateSucursalDto) {
-    await this.findOne(id);
+  async update(
+    id: number,
+    dto: UpdateSucursalDto,
+    departamentoActivo: number | null,
+  ) {
+    await this.findOne(id, departamentoActivo, 'ADMIN');
 
     const { materiales, horarios, ...sucursalData } = dto;
 
@@ -206,8 +264,8 @@ export class SucursalesService {
     });
   }
 
-  async hardDelete(id: number) {
-    await this.findOne(id);
+  async hardDelete(id: number, departamentoActivo: number | null) {
+    await this.findOne(id, departamentoActivo, 'ADMIN');
     await this.prisma.sucursal.delete({ where: { id } });
   }
 
