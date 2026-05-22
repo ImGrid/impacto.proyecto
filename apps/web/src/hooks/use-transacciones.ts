@@ -25,6 +25,13 @@ export const transaccionesKeys = {
   detail: (id: number) => [...transaccionesKeys.all, "detail", id] as const,
 };
 
+// Tipos de destino polimórfico para el filtro de la lista (doc 20 §3).
+export type TipoDestino =
+  | "centro_op"
+  | "externo"
+  | "desconocido"
+  | "sin_asignar";
+
 type UseTransaccionesParams = {
   page?: number;
   limit?: number;
@@ -34,6 +41,7 @@ type UseTransaccionesParams = {
   // Filtros por destino polimórfico (admin). Solo uno tiene sentido a la vez.
   centro_operacional_id?: number;
   acopiador_externo_id?: number;
+  tipo_destino?: TipoDestino;
   fecha_desde?: string;
   fecha_hasta?: string;
 };
@@ -47,6 +55,7 @@ export function useTransacciones(params: UseTransaccionesParams = {}) {
     recolector_id,
     centro_operacional_id,
     acopiador_externo_id,
+    tipo_destino,
     fecha_desde,
     fecha_hasta,
   } = params;
@@ -61,6 +70,7 @@ export function useTransacciones(params: UseTransaccionesParams = {}) {
     searchParams.set("centro_operacional_id", String(centro_operacional_id));
   if (acopiador_externo_id)
     searchParams.set("acopiador_externo_id", String(acopiador_externo_id));
+  if (tipo_destino) searchParams.set("tipo_destino", tipo_destino);
   if (fecha_desde) searchParams.set("fecha_desde", fecha_desde);
   if (fecha_hasta) searchParams.set("fecha_hasta", fecha_hasta);
 
@@ -73,6 +83,7 @@ export function useTransacciones(params: UseTransaccionesParams = {}) {
       recolector_id,
       centro_operacional_id,
       acopiador_externo_id,
+      tipo_destino,
       fecha_desde,
       fecha_hasta,
     }),

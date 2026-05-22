@@ -66,6 +66,7 @@ images/
 
 # Playwright MCP test artifacts
 .playwright-mcp/
+imagenes_playwright/
 
 # Excel files (datos reales del piloto, no se suben al repo)
 *.xlsx

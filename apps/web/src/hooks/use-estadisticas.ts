@@ -16,8 +16,16 @@ function buildQuery(filters: EstadisticasFilters): string {
   if (filters.hasta) params.set("hasta", filters.hasta);
   if (filters.zona_id != null)
     params.set("zona_id", String(filters.zona_id));
+  if (filters.ciudad_id != null)
+    params.set("ciudad_id", String(filters.ciudad_id));
   if (filters.material_id != null)
     params.set("material_id", String(filters.material_id));
+  if (filters.tipo_generador_id != null)
+    params.set("tipo_generador_id", String(filters.tipo_generador_id));
+  if (filters.tipo_destino != null)
+    params.set("tipo_destino", filters.tipo_destino);
+  if (filters.recolector_id != null)
+    params.set("recolector_id", String(filters.recolector_id));
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }

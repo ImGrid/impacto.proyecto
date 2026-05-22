@@ -784,6 +784,18 @@ export class TransaccionesService {
       if (query.acopiador_externo_id) {
         where.acopiador_externo_id = query.acopiador_externo_id;
       }
+      // Filtro por tipo de destino polimórfico (doc 20 §3).
+      if (query.tipo_destino === 'centro_op') {
+        where.centro_operacional_id = { not: null };
+      } else if (query.tipo_destino === 'externo') {
+        where.acopiador_externo_id = { not: null };
+      } else if (query.tipo_destino === 'desconocido') {
+        where.destino_desconocido = true;
+      } else if (query.tipo_destino === 'sin_asignar') {
+        where.centro_operacional_id = null;
+        where.acopiador_externo_id = null;
+        where.destino_desconocido = false;
+      }
     }
 
     if (query.fecha_desde || query.fecha_hasta) {

@@ -80,10 +80,6 @@ export class CreateRecolectorDto {
   @Type(() => Number)
   zona_id: number;
 
-  @IsInt()
-  @Type(() => Number)
-  departamento_id: number;
-
   @IsOptional()
   @IsInt()
   @Type(() => Number)

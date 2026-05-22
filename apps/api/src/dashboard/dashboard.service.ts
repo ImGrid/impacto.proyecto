@@ -436,12 +436,56 @@ export class DashboardService {
       ...scope,
       estado: { in: ['ENTREGADO', 'PAGADO'] },
     };
-    if (query.zona_id) whereBase.zona_id = query.zona_id;
 
-    // Si hay filtro por material, filtramos por detalle también.
-    const detalleFiltro = query.material_id
-      ? { some: { material_id: query.material_id } }
-      : undefined;
+    // Zona y Ciudad apuntan ambas a la relación `zona`; se combinan en un
+    // solo objeto para no colisionar (la ciudad se filtra vía zona.ciudad_id).
+    if (query.zona_id || query.ciudad_id) {
+      whereBase.zona = {
+        ...(query.zona_id ? { id: query.zona_id } : {}),
+        ...(query.ciudad_id ? { ciudad_id: query.ciudad_id } : {}),
+      };
+    }
+
+    // Drill-through de perfil: acota todas las métricas a una recolectora.
+    if (query.recolector_id) whereBase.recolector_id = query.recolector_id;
+
+    // Filtro por tipo de destino polimórfico (mismo patrón que transacciones).
+    if (query.tipo_destino === 'centro_op') {
+      whereBase.centro_operacional_id = { not: null };
+    } else if (query.tipo_destino === 'externo') {
+      whereBase.acopiador_externo_id = { not: null };
+    } else if (query.tipo_destino === 'desconocido') {
+      whereBase.destino_desconocido = true;
+    } else if (query.tipo_destino === 'sin_asignar') {
+      whereBase.centro_operacional_id = null;
+      whereBase.acopiador_externo_id = null;
+      whereBase.destino_desconocido = false;
+    }
+
+    // Filtros a nivel de detalle_transaccion: material y tipo de generador
+    // (este último vía detalle -> sucursal -> generador). Nota: el filtro por
+    // tipo de generador solo alcanza detalles con sucursal asignada; el
+    // material recogido sin origen identificado queda fuera.
+    const detalleCondiciones: Prisma.detalle_transaccionWhereInput[] = [];
+    if (query.material_id) {
+      detalleCondiciones.push({ material_id: query.material_id });
+    }
+    if (query.tipo_generador_id) {
+      detalleCondiciones.push({
+        sucursal: {
+          generador: { tipo_generador_id: query.tipo_generador_id },
+        },
+      });
+    }
+    const detalleFiltro =
+      detalleCondiciones.length === 0
+        ? undefined
+        : {
+            some:
+              detalleCondiciones.length === 1
+                ? detalleCondiciones[0]
+                : { AND: detalleCondiciones },
+          };
 
     const [transActual, transPrev] = await Promise.all([
       this.prisma.transaccion.findMany({
@@ -494,6 +538,10 @@ export class DashboardService {
       por_recolectora: this.rankingRecolectoras(transActual, query.material_id),
       por_sucursal: this.rankingSucursales(transActual, query.material_id),
       por_material: this.rankingMateriales(transActual, query.material_id),
+      por_tipo_generador: this.rankingTiposGenerador(
+        transActual,
+        query.material_id,
+      ),
       evolucion_diaria: this.evolucionDiaria(
         transActual,
         desde,
@@ -517,7 +565,12 @@ export class DashboardService {
             select: {
               id: true,
               nombre: true,
-              generador: { select: { razon_social: true } },
+              generador: {
+                select: {
+                  razon_social: true,
+                  tipo_generador: { select: { id: true, nombre: true } },
+                },
+              },
             },
           },
         },
@@ -561,6 +614,7 @@ export class DashboardService {
       por_recolectora: [],
       por_sucursal: [],
       por_material: [],
+      por_tipo_generador: [],
       evolucion_diaria: [],
     };
   }
@@ -683,6 +737,50 @@ export class DashboardService {
     }
     return Array.from(map.values())
       .map((x) => ({ ...x, kg: this.round(x.kg, 2), bs: this.round(x.bs, 2) }))
+      .sort((a, b) => b.kg - a.kg);
+  }
+
+  /**
+   * Ranking de tipos de generador por kg recolectados (responde a la
+   * petición del cliente de ver "cantidades de recojo por tipo de
+   * generador"). Recorre los detalles: cada línea con sucursal aporta al
+   * tipo de generador de esa sucursal. Los detalles sin sucursal (material
+   * de origen no identificado) no aportan a ningún tipo — el total de este
+   * ranking puede ser menor que el total global por esa razón.
+   */
+  private rankingTiposGenerador(
+    transacciones: Array<{
+      detalle_transaccion: Array<{
+        cantidad: Prisma.Decimal;
+        unidad_medida: string;
+        material_id: number;
+        sucursal: {
+          generador: {
+            tipo_generador: { id: number; nombre: string };
+          };
+        } | null;
+      }>;
+    }>,
+    materialFiltro?: number,
+  ) {
+    const map = new Map<number, { id: number; nombre: string; kg: number }>();
+    for (const t of transacciones) {
+      for (const d of t.detalle_transaccion) {
+        if (d.unidad_medida !== 'KG') continue;
+        if (materialFiltro && d.material_id !== materialFiltro) continue;
+        const tipo = d.sucursal?.generador.tipo_generador;
+        if (!tipo) continue;
+        const acc = map.get(tipo.id) ?? {
+          id: tipo.id,
+          nombre: tipo.nombre,
+          kg: 0,
+        };
+        acc.kg += Number(d.cantidad);
+        map.set(tipo.id, acc);
+      }
+    }
+    return Array.from(map.values())
+      .map((x) => ({ ...x, kg: this.round(x.kg, 2) }))
       .sort((a, b) => b.kg - a.kg);
   }
 

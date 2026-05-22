@@ -29,6 +29,9 @@ type UseZonasParams = {
   // formularios de eventos y notificaciones para que el admin solo elija
   // zonas de su departamento activo.
   departamentoId?: number;
+  // Acota la lista a las zonas de una ciudad concreta. Se usa en el filtro
+  // de la página de Zonas.
+  ciudadId?: number;
 };
 
 export function useZonas(params: UseZonasParams = {}) {
@@ -39,6 +42,7 @@ export function useZonas(params: UseZonasParams = {}) {
     search,
     activo,
     departamentoId,
+    ciudadId,
   } = params;
 
   const searchParams = new URLSearchParams();
@@ -49,6 +53,8 @@ export function useZonas(params: UseZonasParams = {}) {
   if (activo !== undefined) searchParams.set("activo", String(activo));
   if (departamentoId !== undefined)
     searchParams.set("departamento_id", String(departamentoId));
+  if (ciudadId !== undefined)
+    searchParams.set("ciudad_id", String(ciudadId));
 
   return useQuery({
     queryKey: zonasKeys.list({
@@ -58,6 +64,7 @@ export function useZonas(params: UseZonasParams = {}) {
       search,
       activo,
       departamentoId,
+      ciudadId,
     }),
     queryFn: () =>
       clientGet<PaginatedResponse<Zona>>(`/zonas?${searchParams.toString()}`),

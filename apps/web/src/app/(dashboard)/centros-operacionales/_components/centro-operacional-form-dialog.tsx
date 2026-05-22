@@ -10,13 +10,8 @@ import {
   useUpdateCentroOperacional,
 } from "@/hooks/use-centros-operacionales";
 import { useZonas } from "@/hooks/use-zonas";
-import { useDepartamentos } from "@/hooks/use-departamentos";
-import type {
-  CentroOperacional,
-  Departamento,
-  TipoAcopio,
-  Zona,
-} from "@/types/api";
+import { useDepartamentoActivo } from "@/components/departamento-context";
+import type { CentroOperacional, TipoAcopio, Zona } from "@/types/api";
 import {
   Dialog,
   DialogContent,
@@ -70,7 +65,6 @@ const baseSchema = z.object({
     .min(1, "El nombre del punto es obligatorio")
     .max(150, "Máximo 150 caracteres"),
   zona_id: z.string().min(1, "Seleccione una zona"),
-  departamento_id: z.string().min(1, "Seleccione un departamento"),
   direccion: z.string().optional(),
   latitud: z.number().min(-90).max(90).nullable(),
   longitud: z.number().min(-180).max(180).nullable(),
@@ -107,10 +101,13 @@ export function CentroOperacionalFormDialog({
   onOpenChange,
   centro,
 }: CentroOperacionalFormDialogProps) {
-  const { data: zonasData } = useZonas({ limit: 100 });
-  const { data: departamentosData } = useDepartamentos({
+  // El departamento del centro operacional ya no se elige: se deriva de la
+  // zona en el backend. El dropdown de zonas se acota al departamento activo.
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: zonasData } = useZonas({
     limit: 100,
     activo: true,
+    departamentoId: departamentoActivo ?? undefined,
   });
   const isEditing = !!centro;
 
@@ -130,7 +127,7 @@ export function CentroOperacionalFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {!open ? null : !zonasData || !departamentosData ? (
+        {!open ? null : !zonasData ? (
           <div className="py-8 text-center text-muted-foreground">
             Cargando...
           </div>
@@ -139,7 +136,6 @@ export function CentroOperacionalFormDialog({
             key={centro?.id ?? "new"}
             centro={centro}
             zonas={zonasData.data}
-            departamentos={departamentosData.data}
             onClose={() => onOpenChange(false)}
           />
         )}
@@ -151,14 +147,12 @@ export function CentroOperacionalFormDialog({
 interface CentroOperacionalFormProps {
   centro?: CentroOperacional;
   zonas: Zona[];
-  departamentos: Departamento[];
   onClose: () => void;
 }
 
 function CentroOperacionalForm({
   centro,
   zonas,
-  departamentos,
   onClose,
 }: CentroOperacionalFormProps) {
   const isEditing = !!centro;
@@ -177,7 +171,6 @@ function CentroOperacionalForm({
       tipo_acopio: centro?.tipo_acopio ?? "",
       nombre_punto: centro?.nombre_punto ?? "",
       zona_id: centro ? String(centro.zona_id) : "",
-      departamento_id: centro ? String(centro.departamento_id) : "",
       direccion: centro?.direccion ?? "",
       latitud:
         centro && centro.latitud != null ? Number(centro.latitud) : null,
@@ -212,7 +205,6 @@ function CentroOperacionalForm({
       tipo_acopio: data.tipo_acopio as TipoAcopio,
       nombre_punto: data.nombre_punto,
       zona_id: Number(data.zona_id),
-      departamento_id: Number(data.departamento_id),
       ...(data.direccion ? { direccion: data.direccion } : {}),
       ...(data.latitud != null ? { latitud: data.latitud } : {}),
       ...(data.longitud != null ? { longitud: data.longitud } : {}),
@@ -335,62 +327,31 @@ function CentroOperacionalForm({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <FormField
-            control={form.control}
-            name="tipo_acopio"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Tipo de acopio</FormLabel>
-                <Select
-                  onValueChange={field.onChange}
-                  value={field.value}
-                  disabled={isPending}
-                >
-                  <FormControl>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccionar tipo" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="FIJO">Fijo</SelectItem>
-                    <SelectItem value="MOVIL">Móvil</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="departamento_id"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Departamento</FormLabel>
-                <Select
-                  onValueChange={field.onChange}
-                  value={field.value}
-                  disabled={isPending}
-                >
-                  <FormControl>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Seleccionar departamento" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {departamentos.map((d) => (
-                      <SelectItem key={d.id} value={String(d.id)}>
-                        {d.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
+        <FormField
+          control={form.control}
+          name="tipo_acopio"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Tipo de acopio</FormLabel>
+              <Select
+                onValueChange={field.onChange}
+                value={field.value}
+                disabled={isPending}
+              >
+                <FormControl>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Seleccionar tipo" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  <SelectItem value="FIJO">Fijo</SelectItem>
+                  <SelectItem value="MOVIL">Móvil</SelectItem>
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
         <FormField
           control={form.control}

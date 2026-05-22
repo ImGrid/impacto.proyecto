@@ -38,9 +38,6 @@ function formatTick(s: string): string {
 }
 
 export function EvolucionDiariaChart({ items }: Props) {
-  // Reducir densidad de ticks cuando hay muchos puntos, para no saturar.
-  const interval = items.length > 30 ? Math.floor(items.length / 10) : 0;
-
   return (
     <Card>
       <CardHeader>
@@ -63,7 +60,12 @@ export function EvolucionDiariaChart({ items }: Props) {
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
-                interval={interval}
+                // Recharts adelgaza los rótulos automáticamente según el
+                // ancho real: conserva el primero y el último, y oculta los
+                // intermedios que no respeten el minTickGap. Así se ve bien
+                // tanto a ancho completo como dentro del modal.
+                interval="preserveStartEnd"
+                minTickGap={24}
                 tickFormatter={formatTick}
               />
               <YAxis

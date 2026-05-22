@@ -25,6 +25,11 @@ interface RankingChartProps {
   description?: string;
   items: { id: number; label: string; kg: number }[];
   emptyLabel?: string;
+  /**
+   * Si se define, cada barra es clickeable y entrega el `id` del ítem.
+   * Se usa en el ranking de recolectoras para abrir su drawer de perfil.
+   */
+  onItemClick?: (id: number) => void;
 }
 
 const chartConfig = {
@@ -36,14 +41,16 @@ export function RankingChart({
   description,
   items,
   emptyLabel = "Sin datos en el rango seleccionado",
+  onItemClick,
 }: RankingChartProps) {
   // Ordenado descendente — que aparezca en la parte superior del eje Y
   // la barra más grande. Recharts plotea de abajo hacia arriba; al
-  // invertir el array, la #1 queda arriba.
+  // invertir el array, la #1 queda arriba. Se conserva el `id` para que
+  // las barras puedan ser clickeables.
   const data = [...items]
     .sort((a, b) => b.kg - a.kg)
     .reverse()
-    .map((i) => ({ label: i.label, kg: i.kg }));
+    .map((i) => ({ id: i.id, label: i.label, kg: i.kg }));
 
   const height = Math.max(180, data.length * 36);
 
@@ -89,7 +96,16 @@ export function RankingChart({
                 cursor={false}
                 content={<ChartTooltipContent indicator="line" />}
               />
-              <Bar dataKey="kg" fill="var(--color-kg)" radius={[0, 4, 4, 0]} />
+              <Bar
+                dataKey="kg"
+                fill="var(--color-kg)"
+                radius={[0, 4, 4, 0]}
+                cursor={onItemClick ? "pointer" : undefined}
+                onClick={(entry) => {
+                  const id = (entry as { id?: number })?.id;
+                  if (onItemClick && typeof id === "number") onItemClick(id);
+                }}
+              />
             </BarChart>
           </ChartContainer>
         )}

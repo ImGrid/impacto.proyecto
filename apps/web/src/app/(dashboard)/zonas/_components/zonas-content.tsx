@@ -4,6 +4,7 @@ import { useState } from "react";
 import dynamic from "next/dynamic";
 import { Plus, Search, TableProperties, Map } from "lucide-react";
 import { useZonas, useZonasMapa } from "@/hooks/use-zonas";
+import { useCiudades } from "@/hooks/use-ciudades";
 import { ESTADO_OPTIONS } from "@/lib/constants";
 import { columns } from "./columns";
 import { DataTable } from "@/components/shared/data-table";
@@ -34,10 +35,18 @@ export function ZonasContent() {
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [activo, setActivo] = useState<boolean | undefined>(undefined);
+  const [ciudadId, setCiudadId] = useState<number | undefined>(undefined);
 
-  const { data, isLoading } = useZonas({ page, limit: pageSize, search, activo });
+  const { data, isLoading } = useZonas({
+    page,
+    limit: pageSize,
+    search,
+    activo,
+    ciudadId,
+  });
 
   const { data: zonasMapaData } = useZonasMapa();
+  const { data: ciudadesData } = useCiudades({ limit: 100, activo: true });
 
   function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
     setSearch(e.target.value);
@@ -56,6 +65,25 @@ export function ZonasContent() {
             className="pl-9"
           />
         </div>
+        <Select
+          value={ciudadId === undefined ? "all" : String(ciudadId)}
+          onValueChange={(value) => {
+            setCiudadId(value === "all" ? undefined : Number(value));
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Ciudad" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas las ciudades</SelectItem>
+            {ciudadesData?.data.map((c) => (
+              <SelectItem key={c.id} value={String(c.id)}>
+                {c.nombre}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select
           value={activo === undefined ? "all" : String(activo)}
           onValueChange={(value) => {

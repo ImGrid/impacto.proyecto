@@ -66,11 +66,6 @@ export class CreateCentroOperacionalDto {
   @Type(() => Number)
   zona_id: number;
 
-  @IsInt()
-  @IsNotEmpty()
-  @Type(() => Number)
-  departamento_id: number;
-
   @IsOptional()
   @IsString()
   @MaxLength(100)

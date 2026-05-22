@@ -1,12 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { Truck, CheckCircle2, X } from "lucide-react";
-import { useTransacciones } from "@/hooks/use-transacciones";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+import { Truck, CheckCircle2, CalendarIcon, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useTransacciones, type TipoDestino } from "@/hooks/use-transacciones";
 import { useZonas } from "@/hooks/use-zonas";
+import { useRecolectores } from "@/hooks/use-recolectores";
 import type { EstadoTransaccion, Transaccion } from "@/types/api";
 import { DataTable } from "@/components/shared/data-table";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -30,11 +41,26 @@ const estadoOptions = [
   { value: "PAGADO", label: "Pagado" },
 ];
 
+const tipoDestinoOptions: { value: TipoDestino; label: string }[] = [
+  { value: "centro_op", label: "Centro operacional" },
+  { value: "externo", label: "Acopiador/Comprador externo" },
+  { value: "desconocido", label: "Desconocido" },
+  { value: "sin_asignar", label: "Sin asignar" },
+];
+
 export function TransaccionesContent() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [estado, setEstado] = useState<EstadoTransaccion | undefined>(undefined);
   const [zonaId, setZonaId] = useState<number | undefined>(undefined);
+  const [recolectorId, setRecolectorId] = useState<number | undefined>(
+    undefined,
+  );
+  const [tipoDestino, setTipoDestino] = useState<TipoDestino | undefined>(
+    undefined,
+  );
+  const [fechaDesde, setFechaDesde] = useState<Date | undefined>(undefined);
+  const [fechaHasta, setFechaHasta] = useState<Date | undefined>(undefined);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -64,15 +90,40 @@ export function TransaccionesContent() {
     limit: pageSize,
     estado,
     zona_id: zonaId,
+    recolector_id: recolectorId,
+    tipo_destino: tipoDestino,
+    fecha_desde: fechaDesde ? format(fechaDesde, "yyyy-MM-dd") : undefined,
+    fecha_hasta: fechaHasta ? format(fechaHasta, "yyyy-MM-dd") : undefined,
   });
 
   const { data: zonasOpts } = useZonas({ limit: 100, activo: true });
+  // Las recolectoras ya vienen acotadas al departamento activo por el backend.
+  // limit 100 es el máximo que admite PaginationQueryDto (@Max(100)).
+  const { data: recolectoresOpts } = useRecolectores({
+    limit: 100,
+    activo: true,
+  });
 
-  const hasFilters = estado !== undefined || zonaId !== undefined;
+  const recolectorOptions = (recolectoresOpts?.data ?? []).map((r) => ({
+    value: String(r.id),
+    label: r.nombre_completo,
+  }));
+
+  const hasFilters =
+    estado !== undefined ||
+    zonaId !== undefined ||
+    recolectorId !== undefined ||
+    tipoDestino !== undefined ||
+    fechaDesde !== undefined ||
+    fechaHasta !== undefined;
 
   function clearFilters() {
     setEstado(undefined);
     setZonaId(undefined);
+    setRecolectorId(undefined);
+    setTipoDestino(undefined);
+    setFechaDesde(undefined);
+    setFechaHasta(undefined);
     setPage(1);
   }
 
@@ -152,6 +203,104 @@ export function TransaccionesContent() {
             ))}
           </SelectContent>
         </Select>
+
+        <SearchableSelect
+          options={recolectorOptions}
+          value={recolectorId !== undefined ? String(recolectorId) : undefined}
+          onChange={(v) => {
+            setRecolectorId(v === undefined ? undefined : Number(v));
+            setPage(1);
+          }}
+          placeholder="Recolectora"
+          searchPlaceholder="Buscar recolectora..."
+          allLabel="Todas las recolectoras"
+          emptyText="Sin recolectoras"
+          className="w-[220px]"
+        />
+
+        <Select
+          value={tipoDestino ?? "all"}
+          onValueChange={(value) => {
+            setTipoDestino(
+              value === "all" ? undefined : (value as TipoDestino),
+            );
+            setPage(1);
+          }}
+        >
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="Destino" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los destinos</SelectItem>
+            {tipoDestinoOptions.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                "w-[150px] justify-start text-left font-normal",
+                !fechaDesde && "text-muted-foreground",
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {fechaDesde
+                ? format(fechaDesde, "dd MMM yyyy", { locale: es })
+                : "Desde"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={fechaDesde}
+              onSelect={(d) => {
+                setFechaDesde(d);
+                setPage(1);
+              }}
+              locale={es}
+              disabled={(d) => (fechaHasta ? d > fechaHasta : d > new Date())}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className={cn(
+                "w-[150px] justify-start text-left font-normal",
+                !fechaHasta && "text-muted-foreground",
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {fechaHasta
+                ? format(fechaHasta, "dd MMM yyyy", { locale: es })
+                : "Hasta"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={fechaHasta}
+              onSelect={(d) => {
+                setFechaHasta(d);
+                setPage(1);
+              }}
+              locale={es}
+              disabled={(d) =>
+                d > new Date() || (fechaDesde ? d < fechaDesde : false)
+              }
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
 
         {hasFilters && (
           <Button variant="ghost" size="sm" onClick={clearFilters}>

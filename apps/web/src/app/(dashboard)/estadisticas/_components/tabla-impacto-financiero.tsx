@@ -26,6 +26,11 @@ import type { EstadisticasData } from "@/types/api";
  */
 interface Props {
   items: EstadisticasData["por_recolectora"];
+  /**
+   * Si se define, cada fila es clickeable y entrega el `id` de la
+   * recolectora — abre su drawer de perfil (drill-through).
+   */
+  onRecolectoraClick?: (id: number) => void;
 }
 
 function fmt2(n: number): string {
@@ -35,7 +40,7 @@ function fmt2(n: number): string {
   }).format(n);
 }
 
-export function TablaImpactoFinanciero({ items }: Props) {
+export function TablaImpactoFinanciero({ items, onRecolectoraClick }: Props) {
   return (
     <Card>
       <CardHeader>
@@ -63,7 +68,15 @@ export function TablaImpactoFinanciero({ items }: Props) {
               </TableHeader>
               <TableBody>
                 {items.map((r) => (
-                  <TableRow key={r.id}>
+                  <TableRow
+                    key={r.id}
+                    className={onRecolectoraClick ? "cursor-pointer" : undefined}
+                    onClick={
+                      onRecolectoraClick
+                        ? () => onRecolectoraClick(r.id)
+                        : undefined
+                    }
+                  >
                     <TableCell className="font-medium">{r.nombre}</TableCell>
                     <TableCell className="text-muted-foreground text-xs">
                       {r.ci}

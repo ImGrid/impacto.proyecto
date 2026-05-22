@@ -10,21 +10,38 @@ import { RankingChart } from "./_components/ranking-chart";
 import { EvolucionDiariaChart } from "./_components/evolucion-diaria-chart";
 import { TablaImpactoFinanciero } from "./_components/tabla-impacto-financiero";
 import { TablaCo2Material } from "./_components/tabla-co2-material";
+import { RecolectoraDetalleDialog } from "./_components/recolectora-detalle-dialog";
 
 /**
  * Página analítica con filtros. A diferencia del dashboard, el usuario
- * controla el rango y puede hacer drill-down por zona o material.
+ * controla el rango y puede hacer drill-down por zona, ciudad, material,
+ * tipo de generador o tipo de destino.
+ *
+ * El detalle de UNA recolectora NO es un filtro: al hacer clic en su barra
+ * del ranking o en su fila de la tabla se abre un modal de perfil
+ * (drill-through), siguiendo el patrón "details-on-demand".
  */
 export default function EstadisticasPage() {
   const [filters, setFilters] = useState<EstadisticasFilters>({});
   const { data, isLoading } = useEstadisticas(filters);
+
+  // Drill-through: recolectora seleccionada para el drawer de perfil.
+  const [recolectoraId, setRecolectoraId] = useState<number | null>(null);
+  const [detalleOpen, setDetalleOpen] = useState(false);
+
+  function abrirRecolectora(id: number) {
+    setRecolectoraId(id);
+    setDetalleOpen(true);
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Estadísticas</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Análisis completo con filtros por fecha, zona y material. Sin filtros, se muestran los últimos 30 días.
+          Análisis completo con filtros por fecha, geografía, material,
+          tipo de generador y destino. Sin filtros, se muestran los últimos
+          30 días.
         </p>
       </div>
 
@@ -77,12 +94,13 @@ export default function EstadisticasPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <RankingChart
             title="Por recolectora"
-            description="Kilos recolectados en el rango"
+            description="Kilos recolectados en el rango — clic para ver el perfil"
             items={data.por_recolectora.map((r) => ({
               id: r.id,
               label: r.nombre,
               kg: r.kg,
             }))}
+            onItemClick={abrirRecolectora}
           />
           <RankingChart
             title="Por sucursal"
@@ -96,13 +114,39 @@ export default function EstadisticasPage() {
         </div>
       )}
 
+      {/* Ranking por tipo de generador (excluye material sin origen
+          identificado, que no tiene generador asociado). */}
+      {data && (
+        <RankingChart
+          title="Por tipo de generador"
+          description="Kilos recolectados según el tipo de fuente generadora"
+          items={data.por_tipo_generador.map((t) => ({
+            id: t.id,
+            label: t.nombre,
+            kg: t.kg,
+          }))}
+          emptyLabel="Sin datos con origen identificado en el rango"
+        />
+      )}
+
       {/* Tablas detalladas */}
       {data && (
         <>
-          <TablaImpactoFinanciero items={data.por_recolectora} />
+          <TablaImpactoFinanciero
+            items={data.por_recolectora}
+            onRecolectoraClick={abrirRecolectora}
+          />
           <TablaCo2Material items={data.por_material} />
         </>
       )}
+
+      {/* Modal de perfil de recolectora (drill-through) */}
+      <RecolectoraDetalleDialog
+        recolectoraId={recolectoraId}
+        open={detalleOpen}
+        onOpenChange={setDetalleOpen}
+        filters={filters}
+      />
     </div>
   );
 }

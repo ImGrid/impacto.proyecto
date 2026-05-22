@@ -112,7 +112,6 @@ export function useCreateCentroOperacional() {
       tipo_acopio: TipoAcopio;
       nombre_punto: string;
       zona_id: number;
-      departamento_id: number;
       direccion?: string;
       latitud?: number;
       longitud?: number;
@@ -144,7 +143,6 @@ export function useUpdateCentroOperacional() {
         tipo_acopio?: TipoAcopio;
         nombre_punto?: string;
         zona_id?: number;
-        departamento_id?: number;
         direccion?: string;
         latitud?: number;
         longitud?: number;

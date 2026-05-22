@@ -21,6 +21,7 @@ export const recolectoresKeys = {
   list: (params: Record<string, unknown>) =>
     [...recolectoresKeys.lists(), params] as const,
   mapa: () => [...recolectoresKeys.all, "mapa"] as const,
+  detail: (id: number) => [...recolectoresKeys.all, "detail", id] as const,
 };
 
 // El backend filtra automáticamente por el departamento activo de la sesión
@@ -108,6 +109,17 @@ export function useRecolectoresMapa() {
   });
 }
 
+// Detalle de una recolectora por id. Alimenta el drawer de perfil abierto
+// desde la página de Estadísticas. Patrón "detalle por id": la query solo
+// dispara cuando hay un id real (enabled).
+export function useRecolectorDetalle(id: number | null) {
+  return useQuery({
+    queryKey: recolectoresKeys.detail(id ?? 0),
+    queryFn: () => clientGet<Recolector>(`/recolectores/${id}`),
+    enabled: !!id,
+  });
+}
+
 type RecolectorMaterialInput = {
   material_id: number;
   cantidad_mensual?: number;
@@ -129,7 +141,6 @@ export function useCreateRecolector() {
       latitud: number;
       longitud: number;
       zona_id: number;
-      departamento_id: number;
       genero: Genero;
       edad: number;
       asociacion_id?: number;
@@ -165,7 +176,6 @@ export function useUpdateRecolector() {
         latitud?: number;
         longitud?: number;
         zona_id?: number;
-        departamento_id?: number;
         genero?: Genero;
         edad?: number;
         asociacion_id?: number;

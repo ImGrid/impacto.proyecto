@@ -10,19 +10,19 @@ import {
   useCreateRecolector,
   useUpdateRecolector,
 } from "@/hooks/use-recolectores";
-import { useDepartamentos } from "@/hooks/use-departamentos";
 import { useZonas } from "@/hooks/use-zonas";
 import { useAsociaciones } from "@/hooks/use-asociaciones";
 import { useMateriales } from "@/hooks/use-materiales";
 import { useTiposGenerador } from "@/hooks/use-tipos-generador";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import type {
   Asociacion,
-  Departamento,
   DiaSemana,
   Genero,
   Material,
   Recolector,
   TipoGenerador,
+  UnidadMedida,
   Zona,
 } from "@/types/api";
 import {
@@ -70,6 +70,15 @@ const diasSemana: { value: DiaSemana; label: string }[] = [
   { value: "DOMINGO", label: "Domingo" },
 ];
 
+// Etiqueta legible de la unidad de medida del material (misma convención que
+// la usada en el catálogo de materiales y precios).
+const unidadLabels: Record<UnidadMedida, string> = {
+  KG: "Kg",
+  UNIDAD: "Unidad",
+  BOLSA: "Bolsa",
+  TONELADA: "Tonelada",
+};
+
 // --- Zod Schema ---
 
 const materialRowSchema = z.object({
@@ -101,7 +110,6 @@ const baseSchema = z.object({
   latitud: z.number({ error: "La latitud es obligatoria" }).min(-90).max(90),
   longitud: z.number({ error: "La longitud es obligatoria" }).min(-180).max(180),
   zona_id: z.string().min(1, "Seleccione una zona"),
-  departamento_id: z.string().min(1, "Seleccione un departamento"),
   asociacion_id: z.string().optional(),
   genero: z.string().min(1, "Seleccione el género"),
   edad: z.string().min(1, "La edad es obligatoria"),
@@ -143,11 +151,14 @@ export function RecolectorFormDialog({
   onOpenChange,
   recolector,
 }: RecolectorFormDialogProps) {
-  const { data: departamentosData } = useDepartamentos({
+  // El departamento del recolector ya no se elige: se deriva de la zona en el
+  // backend. El dropdown de zonas se acota al departamento activo del admin.
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: zonasData } = useZonas({
     limit: 100,
     activo: true,
+    departamentoId: departamentoActivo ?? undefined,
   });
-  const { data: zonasData } = useZonas({ limit: 100 });
   const { data: asociacionesData } = useAsociaciones({ limit: 100 });
   const { data: materialesData } = useMateriales({ limit: 100 });
   const { data: tiposGenData } = useTiposGenerador({ limit: 100 });
@@ -168,8 +179,7 @@ export function RecolectorFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {!open ? null : !departamentosData ||
-          !zonasData ||
+        {!open ? null : !zonasData ||
           !asociacionesData ||
           !materialesData ||
           !tiposGenData ? (
@@ -180,7 +190,6 @@ export function RecolectorFormDialog({
           <RecolectorForm
             key={recolector?.id ?? "new"}
             recolector={recolector}
-            departamentos={departamentosData.data}
             zonas={zonasData.data}
             asociaciones={asociacionesData.data}
             materialesCatalogo={materialesData.data}
@@ -195,7 +204,6 @@ export function RecolectorFormDialog({
 
 interface RecolectorFormProps {
   recolector?: Recolector;
-  departamentos: Departamento[];
   zonas: Zona[];
   asociaciones: Asociacion[];
   materialesCatalogo: Material[];
@@ -205,7 +213,6 @@ interface RecolectorFormProps {
 
 function RecolectorForm({
   recolector,
-  departamentos,
   zonas,
   asociaciones,
   materialesCatalogo,
@@ -235,7 +242,6 @@ function RecolectorForm({
           ? Number(recolector.longitud)
           : (undefined as unknown as number),
       zona_id: recolector ? String(recolector.zona_id) : "",
-      departamento_id: recolector ? String(recolector.departamento_id) : "",
       asociacion_id:
         recolector && recolector.asociacion_id != null
           ? String(recolector.asociacion_id)
@@ -316,7 +322,6 @@ function RecolectorForm({
       latitud: data.latitud,
       longitud: data.longitud,
       zona_id: Number(data.zona_id),
-      departamento_id: Number(data.departamento_id),
       genero: data.genero as Genero,
       edad: edadNum,
       trabaja_individual: data.trabaja_individual ?? true,
@@ -570,64 +575,34 @@ function RecolectorForm({
               </p>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <FormField
-              control={form.control}
-              name="departamento_id"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Departamento</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                    disabled={isPending}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Seleccionar departamento" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {departamentos.map((d) => (
-                        <SelectItem key={d.id} value={String(d.id)}>
-                          {d.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="zona_id"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Zona</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                    disabled={isPending}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Seleccionar zona" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {zonas.map((zona) => (
-                        <SelectItem key={zona.id} value={String(zona.id)}>
-                          {zona.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
+          <FormField
+            control={form.control}
+            name="zona_id"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Zona</FormLabel>
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value}
+                  disabled={isPending}
+                >
+                  <FormControl>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Seleccionar zona" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {zonas.map((zona) => (
+                      <SelectItem key={zona.id} value={String(zona.id)}>
+                        {zona.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
           <FormField
             control={form.control}
             name="asociacion_id"
@@ -666,38 +641,55 @@ function RecolectorForm({
           <FormField
             control={form.control}
             name="dias_trabajo"
-            render={({ field }) => (
-              <FormItem>
-                <div className="flex flex-wrap gap-x-4 gap-y-2">
-                  {diasSemana.map((dia) => {
-                    const checked = field.value?.includes(dia.value) ?? false;
-                    return (
-                      <label
-                        key={dia.value}
-                        className="flex items-center gap-1.5 text-sm"
-                      >
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={(isChecked) => {
-                            const current = field.value ?? [];
-                            if (isChecked) {
-                              field.onChange([...current, dia.value]);
-                            } else {
-                              field.onChange(
-                                current.filter((d) => d !== dia.value),
-                              );
-                            }
-                          }}
-                          disabled={isPending}
-                        />
-                        {dia.label}
-                      </label>
-                    );
-                  })}
-                </div>
-                <FormMessage />
-              </FormItem>
-            )}
+            render={({ field }) => {
+              const todosMarcados =
+                (field.value?.length ?? 0) === diasSemana.length;
+              return (
+                <FormItem>
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                    <label className="flex items-center gap-1.5 text-sm font-medium">
+                      <Checkbox
+                        checked={todosMarcados}
+                        onCheckedChange={(isChecked) => {
+                          field.onChange(
+                            isChecked ? diasSemana.map((d) => d.value) : [],
+                          );
+                        }}
+                        disabled={isPending}
+                      />
+                      Todos
+                    </label>
+                    {diasSemana.map((dia) => {
+                      const checked =
+                        field.value?.includes(dia.value) ?? false;
+                      return (
+                        <label
+                          key={dia.value}
+                          className="flex items-center gap-1.5 text-sm"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(isChecked) => {
+                              const current = field.value ?? [];
+                              if (isChecked) {
+                                field.onChange([...current, dia.value]);
+                              } else {
+                                field.onChange(
+                                  current.filter((d) => d !== dia.value),
+                                );
+                              }
+                            }}
+                            disabled={isPending}
+                          />
+                          {dia.label}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <FormMessage />
+                </FormItem>
+              );
+            }}
           />
         </fieldset>
 
@@ -823,19 +815,34 @@ function RecolectorForm({
                   <FormField
                     control={form.control}
                     name={`materiales.${index}.cantidad_mensual`}
-                    render={({ field: inputField }) => (
-                      <FormItem>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            step="any"
-                            placeholder="0"
-                            disabled={isPending}
-                            {...inputField}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
+                    render={({ field: inputField }) => {
+                      // La unidad no se hardcodea: se toma del material
+                      // seleccionado en esta fila (unidad_medida_default).
+                      const matId = form.watch(
+                        `materiales.${index}.material_id`,
+                      );
+                      const unidad = materialesCatalogo.find(
+                        (m) => String(m.id) === matId,
+                      )?.unidad_medida_default;
+                      return (
+                        <FormItem>
+                          <FormControl>
+                            <Input
+                              type="number"
+                              step="any"
+                              placeholder="0"
+                              disabled={isPending}
+                              {...inputField}
+                            />
+                          </FormControl>
+                          {unidad ? (
+                            <p className="text-[10px] leading-tight text-muted-foreground">
+                              {unidadLabels[unidad]}
+                            </p>
+                          ) : null}
+                        </FormItem>
+                      );
+                    }}
                   />
 
                   <FormField

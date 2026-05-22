@@ -27,6 +27,13 @@ export type Zona = {
   ciudad_id: number;
   activo: boolean;
   fecha_creacion: string;
+  // El backend siempre incluye la ciudad (con su departamento) en GET /zonas
+  // y GET /zonas/mapa — ver `zonas.service.ts#ciudadInclude` y `findAllForMap`.
+  ciudad: {
+    id: number;
+    nombre: string;
+    departamento: { id: number; nombre: string };
+  };
 };
 
 export type TipoGenerador = {
@@ -521,7 +528,13 @@ export type EstadisticasFilters = {
   desde?: string;
   hasta?: string;
   zona_id?: number;
+  ciudad_id?: number;
   material_id?: number;
+  tipo_generador_id?: number;
+  tipo_destino?: "centro_op" | "externo" | "desconocido" | "sin_asignar";
+  // Acota las métricas a una sola recolectora (drill-through del drawer de
+  // perfil). No se expone en la barra de filtros.
+  recolector_id?: number;
 };
 
 export type EstadisticasData = {
@@ -554,6 +567,11 @@ export type EstadisticasData = {
     kg: number;
     co2_evitado_kg: number;
     porcentaje: number;
+  }[];
+  por_tipo_generador: {
+    id: number;
+    nombre: string;
+    kg: number;
   }[];
   evolucion_diaria: {
     fecha: string;

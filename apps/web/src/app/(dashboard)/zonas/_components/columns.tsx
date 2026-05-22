@@ -41,6 +41,11 @@ export const columns: ColumnDef<Zona>[] = [
     },
   },
   {
+    id: "ciudad",
+    header: "Ciudad",
+    cell: ({ row }) => row.original.ciudad.nombre,
+  },
+  {
     accessorKey: "activo",
     header: "Estado",
     cell: ({ row }) => {

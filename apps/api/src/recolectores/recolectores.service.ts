@@ -8,7 +8,6 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
 import { normalizarCI } from '../common/helpers';
-import { ensureZonaEnDepartamento } from '../common/auth/zona-departamento.helper';
 import {
   CreateRecolectorDto,
   UpdateRecolectorDto,
@@ -37,30 +36,29 @@ export class RecolectoresService {
     dto: CreateRecolectorDto,
     departamentoActivo: number | null,
   ) {
-    // Filtro global por depto: si el caller tiene departamento_activo, el
-    // recolector creado debe estar en ese mismo departamento. Esto evita
-    // que un admin scoped a depto 2 cree recolectores en depto 1 por error.
-    if (
-      departamentoActivo != null &&
-      dto.departamento_id !== departamentoActivo
-    ) {
-      throw new BadRequestException(
-        'El recolector debe crearse en el departamento activo de la sesión',
-      );
-    }
-
-    // La zona elegida debe pertenecer al departamento del recolector
-    // (coherencia del departamento_id denormalizado — doc 19 §5.2).
-    await ensureZonaEnDepartamento(
-      this.prisma,
-      dto.zona_id,
-      dto.departamento_id,
-    );
-
     const password_hash = await argon2.hash(dto.password);
     const ciNormalizado = normalizarCI(dto.cedula_identidad);
 
     return this.prisma.$transaction(async (tx) => {
+      // El departamento_id se deriva de la zona (zona -> ciudad ->
+      // departamento). El cliente ya no lo envía: la zona es la única fuente.
+      const zona = await tx.zona.findUnique({
+        where: { id: dto.zona_id },
+        select: { ciudad: { select: { departamento_id: true } } },
+      });
+      if (!zona) throw new NotFoundException('Zona no encontrada');
+
+      // Filtro global por depto activo: el recolector debe crearse en el
+      // departamento activo de la sesión (a través de la zona elegida).
+      if (
+        departamentoActivo != null &&
+        zona.ciudad.departamento_id !== departamentoActivo
+      ) {
+        throw new BadRequestException(
+          'El recolector debe pertenecer al departamento activo de la sesión',
+        );
+      }
+
       // 1. Create usuario + recolector (nested write)
       const usuario = await tx.usuario.create({
         data: {
@@ -77,7 +75,7 @@ export class RecolectoresService {
               latitud: dto.latitud,
               longitud: dto.longitud,
               zona_id: dto.zona_id,
-              departamento_id: dto.departamento_id,
+              departamento_id: zona.ciudad.departamento_id,
               asociacion_id: dto.asociacion_id,
               genero: dto.genero,
               edad: dto.edad,
@@ -220,36 +218,44 @@ export class RecolectoresService {
     // departamento, lanza 404 antes de tocar BD.
     const recolector = await this.findOne(id, departamentoActivo);
 
-    // Si el dto intenta cambiar el depto, debe coincidir con el activo.
-    if (
-      departamentoActivo != null &&
-      dto.departamento_id !== undefined &&
-      dto.departamento_id !== departamentoActivo
-    ) {
-      throw new BadRequestException(
-        'No se puede mover el recolector a otro departamento desde esta sesión',
-      );
-    }
-
-    // Si cambia la zona y/o el departamento, deben seguir siendo coherentes
-    // entre sí (zona -> ciudad -> departamento).
-    if (dto.zona_id !== undefined || dto.departamento_id !== undefined) {
-      await ensureZonaEnDepartamento(
-        this.prisma,
-        dto.zona_id ?? recolector.zona_id,
-        dto.departamento_id ?? recolector.departamento_id,
-      );
+    // Si cambia la zona, el departamento_id se re-deriva de la nueva zona
+    // (zona -> ciudad -> departamento) y debe seguir en el departamento activo.
+    let departamentoIdNuevo: number | undefined;
+    if (dto.zona_id !== undefined) {
+      const zona = await this.prisma.zona.findUnique({
+        where: { id: dto.zona_id },
+        select: { ciudad: { select: { departamento_id: true } } },
+      });
+      if (!zona) throw new NotFoundException('Zona no encontrada');
+      if (
+        departamentoActivo != null &&
+        zona.ciudad.departamento_id !== departamentoActivo
+      ) {
+        throw new BadRequestException(
+          'No se puede mover el recolector a una zona de otro departamento',
+        );
+      }
+      departamentoIdNuevo = zona.ciudad.departamento_id;
     }
 
     return this.prisma.$transaction(async (tx) => {
       // Extract relation arrays and activo from dto
       const { dias_trabajo, materiales, tipos_generador_ids, activo, ...recolectorData } = dto;
 
-      // Update recolector fields if any
-      if (Object.keys(recolectorData).length > 0) {
+      // Update recolector fields if any. Si cambió la zona, también se
+      // actualiza el departamento_id derivado.
+      if (
+        Object.keys(recolectorData).length > 0 ||
+        departamentoIdNuevo !== undefined
+      ) {
         await tx.recolector.update({
           where: { id },
-          data: recolectorData,
+          data: {
+            ...recolectorData,
+            ...(departamentoIdNuevo !== undefined
+              ? { departamento_id: departamentoIdNuevo }
+              : {}),
+          },
         });
       }
 
