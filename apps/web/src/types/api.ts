@@ -67,18 +67,6 @@ export type PrecioMaterial = {
   };
 };
 
-export type Administrador = {
-  id: number;
-  usuario_id: number;
-  nombre_completo: string;
-  telefono: string;
-  fecha_creacion: string;
-  usuario: {
-    email: string | null;
-    activo: boolean;
-  };
-};
-
 export type Generador = {
   id: number;
   usuario_id: number;

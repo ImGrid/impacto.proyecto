@@ -21,7 +21,6 @@ import { TiposGeneradorModule } from "./tipos-generador";
 import { PreciosMaterialModule } from "./precios-material";
 import { EventosModule } from "./eventos";
 import { NotificacionesModule } from "./notificaciones";
-import { AdministradoresModule } from "./administradores";
 import { TransaccionesModule } from "./transacciones";
 import { PagosModule } from "./pagos";
 import { PerfilModule } from "./perfil";
@@ -71,7 +70,8 @@ import { DashboardModule } from "./dashboard";
     NotificacionesModule,
 
     // Módulos CRUD - Usuarios
-    AdministradoresModule,
+    // (Administradores se gestionan fuera de la app — vía script de BD —
+    // por eso no hay módulo CRUD de administradores.)
     CentrosOperacionalesModule,
     GeneradoresModule,
     SucursalesModule,
@@ -87,7 +87,9 @@ import { DashboardModule } from "./dashboard";
     // Módulo - Dashboard (KPIs, gráficos y alertas del panel admin)
     DashboardModule,
 
-    // Rate limiting: 100 requests por minuto por IP
+    // Rate limiting global: 500 requests por minuto por IP.
+    // Los endpoints sensibles (login, refresh, switch-departamento,
+    // transacciones, pagos) sobreescriben este límite con @Throttle.
     ThrottlerModule.forRoot([
       {
         ttl: 60000,

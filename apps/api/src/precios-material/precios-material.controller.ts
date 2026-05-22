@@ -33,11 +33,13 @@ export class PreciosMaterialController {
   }
 
   @Get()
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
   findAll(@Query() query: PrecioMaterialQueryDto) {
     return this.preciosMaterialService.findAll(query);
   }
 
   @Get(':id')
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.preciosMaterialService.findOne(id);
   }

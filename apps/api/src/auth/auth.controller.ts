@@ -7,6 +7,7 @@ import {
   UseGuards,
   Headers,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { rol_usuario } from '@prisma/client';
 import { AuthService } from './auth.service';
 import {
@@ -22,7 +23,9 @@ import { RefreshTokenGuard } from './guards';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  // Rate limit estricto contra fuerza bruta de contraseñas: 5 intentos/min por IP.
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   login(
@@ -33,6 +36,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseGuards(RefreshTokenGuard)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
@@ -81,6 +85,7 @@ export class AuthController {
    * con el nuevo `departamento_activo`. Solo aplica a rol ADMIN.
    */
   @Roles(rol_usuario.ADMIN)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('switch-departamento')
   @HttpCode(HttpStatus.OK)
   switchDepartamento(

@@ -28,8 +28,9 @@ export class NotificacionesController {
     @Body() dto: CreateNotificacionDto,
     @CurrentUser('userId') userId: number,
     @CurrentUser('rol') rol: rol_usuario,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.notificacionesService.create(dto, userId, rol);
+    return this.notificacionesService.create(dto, userId, rol, departamentoActivo);
   }
 
   @Get()
@@ -58,8 +59,12 @@ export class NotificacionesController {
     rol_usuario.ACOPIADOR,
     rol_usuario.GENERADOR,
   )
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.notificacionesService.findOne(id);
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('userId') userId: number,
+    @CurrentUser('rol') rol: rol_usuario,
+  ) {
+    return this.notificacionesService.findOne(id, userId, rol);
   }
 
   @Patch(':id/leer')

@@ -25,8 +25,9 @@ export class EventosController {
   create(
     @Body() dto: CreateEventoDto,
     @CurrentUser('userId') userId: number,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.eventosService.create(dto, userId);
+    return this.eventosService.create(dto, userId, departamentoActivo);
   }
 
   @Get()

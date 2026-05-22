@@ -496,6 +496,7 @@ export class TransaccionesService {
     dto: UpdateTransaccionDto,
     userId: number,
     userRol: rol_usuario,
+    departamentoActivo: number | null,
   ) {
     const transaccion = await this.prisma.transaccion.findUnique({
       where: { id },
@@ -535,6 +536,17 @@ export class TransaccionesService {
         transaccion.recolector_id !== recolector.id
       ) {
         throw new ForbiddenException('No tiene acceso a esta entrega');
+      }
+    } else if (userRol === 'ADMIN' && departamentoActivo != null) {
+      // Filtro global: el admin solo puede operar sobre transacciones de su
+      // departamento activo. Mismo criterio que findOne y editAdmin.
+      const deptoTransaccion = await this.derivarDeptoDeTransaccion(
+        this.prisma,
+        transaccion.id,
+        transaccion.recolector_id,
+      );
+      if (deptoTransaccion !== departamentoActivo) {
+        throw new NotFoundException('Entrega no encontrada');
       }
     }
 

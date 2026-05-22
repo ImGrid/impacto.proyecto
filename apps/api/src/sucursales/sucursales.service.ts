@@ -192,6 +192,7 @@ export class SucursalesService {
     id: number,
     departamentoActivo: number | null,
     userRol?: rol_usuario,
+    userId?: number,
   ) {
     const sucursal = await this.prisma.sucursal.findUnique({
       where: { id },
@@ -211,6 +212,18 @@ export class SucursalesService {
       throw new NotFoundException('Sucursal no encontrada');
     }
 
+    // Object-level authorization (OWASP API1:2023 BOLA): un generador solo
+    // puede consultar sucursales de su propia empresa, no de otros generadores.
+    if (userRol === 'GENERADOR') {
+      const generador = await this.prisma.generador.findUnique({
+        where: { id: sucursal.generador_id },
+        select: { usuario_id: true },
+      });
+      if (!generador || generador.usuario_id !== userId) {
+        throw new NotFoundException('Sucursal no encontrada');
+      }
+    }
+
     return sucursal;
   }
 
@@ -223,11 +236,37 @@ export class SucursalesService {
 
     const { materiales, horarios, ...sucursalData } = dto;
 
+    // Si cambia la zona, recalcular departamento_id (siempre se deriva de la
+    // zona, nunca lo manda el cliente) y validar que la nueva zona sea del
+    // departamento activo — coherente con `create`.
+    let departamentoIdNuevo: number | undefined;
+    if (sucursalData.zona_id !== undefined) {
+      const zona = await this.prisma.zona.findUnique({
+        where: { id: sucursalData.zona_id },
+        select: { ciudad: { select: { departamento_id: true } } },
+      });
+      if (!zona) throw new NotFoundException('Zona no encontrada');
+      if (
+        departamentoActivo != null &&
+        zona.ciudad.departamento_id !== departamentoActivo
+      ) {
+        throw new BadRequestException(
+          'No se puede mover la sucursal a una zona de otro departamento',
+        );
+      }
+      departamentoIdNuevo = zona.ciudad.departamento_id;
+    }
+
     return this.prisma.$transaction(async (tx) => {
       if (Object.keys(sucursalData).length > 0) {
         await tx.sucursal.update({
           where: { id },
-          data: sucursalData,
+          data: {
+            ...sucursalData,
+            ...(departamentoIdNuevo !== undefined
+              ? { departamento_id: departamentoIdNuevo }
+              : {}),
+          },
         });
       }
 

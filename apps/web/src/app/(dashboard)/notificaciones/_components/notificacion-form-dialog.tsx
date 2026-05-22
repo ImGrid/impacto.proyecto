@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import { useCreateNotificacion } from "@/hooks/use-notificaciones";
 import { useZonas } from "@/hooks/use-zonas";
 import { useRecolectores } from "@/hooks/use-recolectores";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import {
   Dialog,
   DialogContent,
@@ -37,7 +38,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 
 const MODOS = [
-  { value: "general", label: "General (todas las recolectoras)" },
+  {
+    value: "general",
+    label: "General (todas las recolectoras del departamento)",
+  },
   { value: "zona", label: "Por zona" },
   { value: "individual", label: "Individual (seleccionar recolectoras)" },
 ];
@@ -70,7 +74,15 @@ export function NotificacionFormDialog({
   const [zonaId, setZonaId] = useState<string>("");
   const [selectedReceptors, setSelectedReceptors] = useState<number[]>([]);
 
-  const { data: zonasData } = useZonas({ limit: 100, activo: true });
+  // Las zonas se acotan al departamento activo del admin: en modo "Por zona"
+  // solo debe poder elegir zonas de su departamento. Las recolectoras ya
+  // vienen filtradas por departamento desde el backend.
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: zonasData } = useZonas({
+    limit: 100,
+    activo: true,
+    departamentoId: departamentoActivo ?? undefined,
+  });
   const { data: recolectoresData } = useRecolectores({
     limit: 100,
     activo: true,

@@ -68,7 +68,12 @@ export class NotificacionesService {
    *   fijo recolector ↔ acopiador desapareció; cualquier centro del depto
    *   puede tomar la solicitud.
    */
-  async create(dto: CreateNotificacionDto, userId: number, userRol: rol_usuario) {
+  async create(
+    dto: CreateNotificacionDto,
+    userId: number,
+    userRol: rol_usuario,
+    departamentoActivo: number | null,
+  ) {
     if (userRol === 'GENERADOR') {
       return this.createFromGenerador(dto, userId);
     }
@@ -78,7 +83,7 @@ export class NotificacionesService {
     }
 
     if (userRol === 'ADMIN') {
-      return this.createFromAdmin(dto, userId);
+      return this.createFromAdmin(dto, userId, departamentoActivo);
     }
 
     throw new ForbiddenException('Rol no permitido para crear notificaciones');
@@ -175,7 +180,11 @@ export class NotificacionesService {
     return mapNotificacion(notificaciones[0]);
   }
 
-  private async createFromAdmin(dto: CreateNotificacionDto, userId: number) {
+  private async createFromAdmin(
+    dto: CreateNotificacionDto,
+    userId: number,
+    departamentoActivo: number | null,
+  ) {
     const tieneZona = dto.zona_id !== undefined;
     const tieneReceptores =
       dto.receptor_ids !== undefined && dto.receptor_ids.length > 0;
@@ -186,31 +195,68 @@ export class NotificacionesService {
       );
     }
 
+    // --- MODO "POR ZONA": broadcast a los recolectores de una zona ---
     if (tieneZona) {
       const zona = await this.prisma.zona.findUnique({
         where: { id: dto.zona_id },
+        select: { id: true, ciudad: { select: { departamento_id: true } } },
       });
       if (!zona) throw new NotFoundException('Zona no encontrada');
-    }
-
-    if (tieneReceptores) {
-      const usuarios = await this.prisma.usuario.findMany({
-        where: { id: { in: dto.receptor_ids } },
-        select: { id: true },
-      });
-      if (usuarios.length !== dto.receptor_ids!.length) {
-        throw new BadRequestException('Uno o más receptores no existen');
+      // La zona elegida debe pertenecer al departamento activo del admin.
+      if (
+        departamentoActivo != null &&
+        zona.ciudad.departamento_id !== departamentoActivo
+      ) {
+        throw new BadRequestException(
+          'La zona seleccionada no pertenece a su departamento activo',
+        );
       }
+
+      const notificacion = await this.prisma.notificacion.create({
+        data: {
+          tipo: 'GENERAL',
+          emisor_id: userId,
+          receptor_id: null,
+          zona_id: dto.zona_id,
+          evento_id: null,
+          titulo: dto.titulo,
+          mensaje: dto.mensaje,
+        },
+        include: notificacionInclude,
+      });
+
+      this.fcm.sendToZone(dto.zona_id!, dto.titulo, dto.mensaje ?? '');
+      return mapNotificacion(notificacion);
     }
 
-    const tipo = tieneReceptores ? 'SISTEMA' : 'GENERAL';
-
+    // --- MODO "INDIVIDUAL": notificación directa a recolectoras concretas ---
     if (tieneReceptores) {
+      // Cada receptor debe ser una recolectora del departamento activo.
+      const recolectores = await this.prisma.recolector.findMany({
+        where: { usuario_id: { in: dto.receptor_ids } },
+        select: { usuario_id: true, departamento_id: true },
+      });
+      if (recolectores.length !== dto.receptor_ids!.length) {
+        throw new BadRequestException(
+          'Uno o más destinatarios no son recolectoras válidas',
+        );
+      }
+      if (departamentoActivo != null) {
+        const ajeno = recolectores.find(
+          (r) => r.departamento_id !== departamentoActivo,
+        );
+        if (ajeno) {
+          throw new BadRequestException(
+            'Uno o más destinatarios no pertenecen a su departamento activo',
+          );
+        }
+      }
+
       const notificaciones = await this.prisma.$transaction(
         dto.receptor_ids!.map((receptorId) =>
           this.prisma.notificacion.create({
             data: {
-              tipo,
+              tipo: 'SISTEMA',
               emisor_id: userId,
               receptor_id: receptorId,
               zona_id: null,
@@ -223,7 +269,6 @@ export class NotificacionesService {
         ),
       );
 
-      // Enviar push a cada receptor
       for (const receptorId of dto.receptor_ids!) {
         this.fcm.sendToUser(receptorId, dto.titulo, dto.mensaje ?? '');
       }
@@ -231,25 +276,46 @@ export class NotificacionesService {
       return notificaciones.map(mapNotificacion);
     }
 
-    const notificacion = await this.prisma.notificacion.create({
-      data: {
-        tipo,
-        emisor_id: userId,
-        receptor_id: null,
-        zona_id: dto.zona_id ?? null,
-        evento_id: null,
-        titulo: dto.titulo,
-        mensaje: dto.mensaje,
-      },
-      include: notificacionInclude,
+    // --- MODO "GENERAL": a TODAS las recolectoras del departamento activo ---
+    if (departamentoActivo == null) {
+      throw new BadRequestException(
+        'No hay un departamento activo en la sesión para enviar una notificación general',
+      );
+    }
+    const recolectoresDelDepto = await this.prisma.recolector.findMany({
+      where: { departamento_id: departamentoActivo, activo: true },
+      select: { usuario_id: true },
     });
-
-    // Enviar push a la zona si tiene zona
-    if (dto.zona_id) {
-      this.fcm.sendToZone(dto.zona_id, dto.titulo, dto.mensaje ?? '');
+    if (recolectoresDelDepto.length === 0) {
+      throw new BadRequestException(
+        'No hay recolectoras activas en su departamento.',
+      );
     }
 
-    return mapNotificacion(notificacion);
+    // Una notificación directa por recolectora: así cada una la ve en su app
+    // (findMine filtra por receptor_id) y se le envía push individual.
+    const notificaciones = await this.prisma.$transaction(
+      recolectoresDelDepto.map((r) =>
+        this.prisma.notificacion.create({
+          data: {
+            tipo: 'GENERAL',
+            emisor_id: userId,
+            receptor_id: r.usuario_id,
+            zona_id: null,
+            evento_id: null,
+            titulo: dto.titulo,
+            mensaje: dto.mensaje,
+          },
+          include: notificacionInclude,
+        }),
+      ),
+    );
+
+    for (const r of recolectoresDelDepto) {
+      this.fcm.sendToUser(r.usuario_id, dto.titulo, dto.mensaje ?? '');
+    }
+
+    return mapNotificacion(notificaciones[0]);
   }
 
   /**
@@ -343,7 +409,14 @@ export class NotificacionesService {
     );
   }
 
-  async findOne(id: number) {
+  /**
+   * Detalle de una notificación.
+   * Valida ownership (OWASP API1:2023 BOLA), mismo criterio que markAsRead:
+   * - ADMIN: acceso completo (panel web).
+   * - Directa (receptor_id seteado): solo el destinatario.
+   * - Broadcast (receptor_id null): solo un recolector cuya zona coincida.
+   */
+  async findOne(id: number, userId: number, userRol: rol_usuario) {
     const notificacion = await this.prisma.notificacion.findUnique({
       where: { id },
       include: notificacionInclude,
@@ -351,6 +424,31 @@ export class NotificacionesService {
     if (!notificacion) {
       throw new NotFoundException('Notificación no encontrada');
     }
+
+    if (userRol !== 'ADMIN') {
+      if (notificacion.receptor_id !== null) {
+        // Notificación directa: solo el destinatario.
+        if (notificacion.receptor_id !== userId) {
+          throw new ForbiddenException('No tiene acceso a esta notificación');
+        }
+      } else {
+        // Broadcast: solo un recolector de la misma zona.
+        if (userRol !== 'RECOLECTOR') {
+          throw new ForbiddenException('No tiene acceso a esta notificación');
+        }
+        const recolector = await this.prisma.recolector.findFirst({
+          where: { usuario_id: userId },
+        });
+        if (
+          !recolector ||
+          notificacion.zona_id === null ||
+          recolector.zona_id !== notificacion.zona_id
+        ) {
+          throw new ForbiddenException('No tiene acceso a esta notificación');
+        }
+      }
+    }
+
     return mapNotificacion(notificacion);
   }
 
@@ -396,7 +494,12 @@ export class NotificacionesService {
   }
 
   async hardDelete(id: number) {
-    await this.findOne(id);
+    const notificacion = await this.prisma.notificacion.findUnique({
+      where: { id },
+    });
+    if (!notificacion) {
+      throw new NotFoundException('Notificación no encontrada');
+    }
     await this.prisma.notificacion.delete({ where: { id } });
   }
 }

@@ -10,6 +10,7 @@ import { es } from "date-fns/locale";
 import { CalendarIcon, Loader2 } from "lucide-react";
 import { useCreateEvento, useUpdateEvento } from "@/hooks/use-eventos";
 import { useZonas } from "@/hooks/use-zonas";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import type { Evento, Zona } from "@/types/api";
 import { cn } from "@/lib/utils";
 import {
@@ -82,7 +83,14 @@ export function EventoFormDialog({
   onOpenChange,
   evento,
 }: EventoFormDialogProps) {
-  const { data: zonasData } = useZonas({ limit: 100, activo: true });
+  // El dropdown de zonas se acota al departamento activo del admin: un
+  // evento solo puede crearse en una zona de su propio departamento.
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: zonasData } = useZonas({
+    limit: 100,
+    activo: true,
+    departamentoId: departamentoActivo ?? undefined,
+  });
   const isEditing = !!evento;
 
   return (

@@ -49,11 +49,12 @@ export class AuthService {
     }
 
     // 4. Resolver departamento activo según rol
-    const departamentoActivo = await this.resolveDepartamentoActivoEnLogin(
-      usuario.id,
-      usuario.rol,
-      dto.departamento_id,
-    );
+    const { departamentoActivo, departamentoFijo } =
+      await this.resolveDepartamentoActivoEnLogin(
+        usuario.id,
+        usuario.rol,
+        dto.departamento_id,
+      );
 
     // 5. Generar tokens y guardar refresh en BD
     const tokens = await this.generateTokens(
@@ -61,6 +62,7 @@ export class AuthService {
       usuario.identificador,
       usuario.rol,
       departamentoActivo,
+      departamentoFijo,
     );
     await this.saveRefreshToken(usuario.id, tokens.refresh_token, dispositivo);
 
@@ -91,6 +93,18 @@ export class AuthService {
       );
     }
 
+    // Un admin ASIGNADO a un departamento no puede cambiarse a otro.
+    // Solo los admins globales (sin departamento asignado) usan el switcher.
+    const admin = await this.prisma.administrador.findUnique({
+      where: { usuario_id: userId },
+      select: { departamento_id: true },
+    });
+    if (admin?.departamento_id != null) {
+      throw new ForbiddenException(
+        'Está asignado a un departamento y no puede cambiarlo',
+      );
+    }
+
     const departamento = await this.prisma.departamento.findUnique({
       where: { id: departamentoId },
       select: { id: true, activo: true },
@@ -106,11 +120,13 @@ export class AuthService {
       where: { usuario_id: userId },
     });
 
+    // Solo admins globales llegan aquí, así que el depto no es fijo.
     const tokens = await this.generateTokens(
       usuario.id,
       usuario.identificador,
       usuario.rol,
       departamento.id,
+      false,
     );
     await this.saveRefreshToken(usuario.id, tokens.refresh_token, dispositivo);
 
@@ -225,11 +241,23 @@ export class AuthService {
     // 5. Rotación: borrar token viejo, generar nuevo par
     await this.prisma.sesion_refresh.delete({ where: { id: sesion.id } });
 
+    // Recalcular si el admin tiene departamento fijo (su asignación pudo
+    // cambiar entre sesiones). Para roles no-admin el depto siempre es fijo.
+    let departamentoFijo = true;
+    if (usuario.rol === 'ADMIN') {
+      const admin = await this.prisma.administrador.findUnique({
+        where: { usuario_id: usuario.id },
+        select: { departamento_id: true },
+      });
+      departamentoFijo = admin?.departamento_id != null;
+    }
+
     const tokens = await this.generateTokens(
       usuario.id,
       usuario.identificador,
       usuario.rol,
       departamentoActivo,
+      departamentoFijo,
     );
     await this.saveRefreshToken(
       usuario.id,
@@ -266,21 +294,53 @@ export class AuthService {
   // --- Helpers privados ---
 
   /**
-   * Resuelve el `departamento_activo` que va al JWT al hacer login,
-   * en función del rol del usuario y del input opcional del cliente.
+   * Resuelve el `departamento_activo` y si es fijo, para el JWT del login.
    *
    * Reglas:
-   * - ADMIN: usa `dto.departamento_id`, obligatorio, debe existir y estar activo.
-   * - RECOLECTOR: usa el de su recolector (fijo en BD).
-   * - ACOPIADOR (centro operacional): usa el de su centro_operacional (fijo).
-   * - GENERADOR: null (entidad global; no aplica filtro de depto).
+   * - ADMIN ASIGNADO (tiene `administrador.departamento_id`): se le fuerza
+   *   ese departamento; no puede ingresar a otro. `departamentoFijo = true`.
+   * - ADMIN GLOBAL (sin departamento asignado): usa `dto.departamento_id`,
+   *   obligatorio, debe existir y estar activo. `departamentoFijo = false`.
+   * - RECOLECTOR / ACOPIADOR: el de su actor (fijo en BD). `fijo = true`.
+   * - GENERADOR: null (entidad global). `fijo = true` (no usa switcher).
    */
   private async resolveDepartamentoActivoEnLogin(
     userId: number,
     rol: string,
     departamentoIdInput: number | undefined,
-  ): Promise<number | null> {
+  ): Promise<{ departamentoActivo: number | null; departamentoFijo: boolean }> {
     if (rol === 'ADMIN') {
+      const admin = await this.prisma.administrador.findUnique({
+        where: { usuario_id: userId },
+        select: {
+          departamento_id: true,
+          departamento: { select: { nombre: true } },
+        },
+      });
+      if (!admin) {
+        throw new UnauthorizedException(
+          'Perfil de administrador no encontrado',
+        );
+      }
+
+      // Admin ASIGNADO a un departamento: se le fuerza ese depto.
+      if (admin.departamento_id !== null) {
+        if (
+          departamentoIdInput !== undefined &&
+          departamentoIdInput !== admin.departamento_id
+        ) {
+          const nombreDepto = admin.departamento?.nombre ?? 'su departamento';
+          throw new BadRequestException(
+            `Está asignado al departamento ${nombreDepto}. Seleccione ese departamento para iniciar sesión.`,
+          );
+        }
+        return {
+          departamentoActivo: admin.departamento_id,
+          departamentoFijo: true,
+        };
+      }
+
+      // Admin GLOBAL: elige departamento al entrar.
       if (!departamentoIdInput) {
         throw new BadRequestException(
           'Debe seleccionar un departamento para iniciar sesión',
@@ -293,10 +353,15 @@ export class AuthService {
       if (!departamento || !departamento.activo) {
         throw new BadRequestException('Departamento no encontrado o inactivo');
       }
-      return departamento.id;
+      return { departamentoActivo: departamento.id, departamentoFijo: false };
     }
 
-    return this.resolveDepartamentoActivoDelUsuario(userId, rol);
+    // Roles no-admin: departamento fijo del actor (o null para generador).
+    const departamentoActivo = await this.resolveDepartamentoActivoDelUsuario(
+      userId,
+      rol,
+    );
+    return { departamentoActivo, departamentoFijo: true };
   }
 
   /**
@@ -347,12 +412,14 @@ export class AuthService {
     identificador: string,
     rol: string,
     departamento_activo: number | null,
+    departamento_fijo: boolean,
   ) {
     const payload: JwtPayload = {
       sub: userId,
       identificador,
       rol,
       departamento_activo,
+      departamento_fijo,
     };
 
     // El refresh lleva un `jti` (JWT ID) único para que cada emisión sea

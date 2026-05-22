@@ -6,13 +6,21 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
+import { FcmService } from '../common/services/fcm.service';
 import { CreateEventoDto, UpdateEventoDto, EventoQueryDto } from './dto';
 
 @Injectable()
 export class EventosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fcm: FcmService,
+  ) {}
 
-  async create(dto: CreateEventoDto, userId: number) {
+  async create(
+    dto: CreateEventoDto,
+    userId: number,
+    departamentoActivo: number | null,
+  ) {
     // Obtener el administrador a partir del usuario_id del JWT
     const admin = await this.prisma.administrador.findUnique({
       where: { usuario_id: userId },
@@ -23,16 +31,25 @@ export class EventosService {
       );
     }
 
-    // Verificar que la zona existe
+    // Verificar que la zona existe y pertenece al departamento activo del admin
     const zona = await this.prisma.zona.findUnique({
       where: { id: dto.zona_id },
+      select: { id: true, ciudad: { select: { departamento_id: true } } },
     });
     if (!zona) {
       throw new NotFoundException('Zona no encontrada');
     }
+    if (
+      departamentoActivo != null &&
+      zona.ciudad.departamento_id !== departamentoActivo
+    ) {
+      throw new BadRequestException(
+        'La zona seleccionada no pertenece a su departamento activo',
+      );
+    }
 
     // Crear evento + notificación automática en transacción
-    return this.prisma.$transaction(async (tx) => {
+    const eventoCreado = await this.prisma.$transaction(async (tx) => {
       const evento = await tx.evento.create({
         data: {
           titulo: dto.titulo,
@@ -67,6 +84,13 @@ export class EventosService {
 
       return evento;
     });
+
+    // Avisar por push (FCM) a los recolectores de la zona del evento.
+    // Fire-and-forget, mismo mecanismo que usa el módulo de notificaciones
+    // para RESIDUOS_DISPONIBLES. La app móvil ya muestra cualquier push.
+    this.fcm.sendToZone(dto.zona_id, dto.titulo, dto.descripcion ?? '');
+
+    return eventoCreado;
   }
 
   async findAll(query: EventoQueryDto, departamentoActivo: number | null) {

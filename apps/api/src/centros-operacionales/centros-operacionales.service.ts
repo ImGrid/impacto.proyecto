@@ -8,6 +8,7 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
 import { normalizarCI } from '../common/helpers';
+import { ensureZonaEnDepartamento } from '../common/auth/zona-departamento.helper';
 import {
   CreateCentroOperacionalDto,
   UpdateCentroOperacionalDto,
@@ -37,6 +38,14 @@ export class CentrosOperacionalesService {
         'El centro operacional debe crearse en el departamento activo de la sesión',
       );
     }
+
+    // La zona elegida debe pertenecer al departamento del centro operacional
+    // (coherencia del departamento_id denormalizado — doc 19 §5.2).
+    await ensureZonaEnDepartamento(
+      this.prisma,
+      dto.zona_id,
+      dto.departamento_id,
+    );
 
     const password_hash = await argon2.hash(dto.password);
 
@@ -164,6 +173,19 @@ export class CentrosOperacionalesService {
     ) {
       throw new BadRequestException(
         'No se puede mover el centro operacional a otro departamento desde esta sesión',
+      );
+    }
+
+    // Si cambia la zona y/o el departamento, deben seguir siendo coherentes
+    // entre sí (zona -> ciudad -> departamento).
+    if (
+      centroData.zona_id !== undefined ||
+      centroData.departamento_id !== undefined
+    ) {
+      await ensureZonaEnDepartamento(
+        this.prisma,
+        centroData.zona_id ?? centro.zona_id,
+        centroData.departamento_id ?? centro.departamento_id,
       );
     }
 

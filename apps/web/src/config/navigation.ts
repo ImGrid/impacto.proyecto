@@ -1,6 +1,5 @@
 import {
   LayoutDashboard,
-  ShieldCheck,
   Truck,
   Store,
   Building2,
@@ -40,7 +39,6 @@ export const sidebarNavigation: NavSection[] = [
     title: "Gestión de Usuarios",
     icon: UsersRound,
     items: [
-      { title: "Administradores", href: "/administradores", icon: ShieldCheck },
       { title: "Recolectores", href: "/recolectores", icon: Truck },
       { title: "Centros operacionales", href: "/centros-operacionales", icon: Store },
       { title: "Generadores", href: "/generadores", icon: Building2 },

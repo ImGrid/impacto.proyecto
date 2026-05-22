@@ -1,6 +1,7 @@
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { TopBar } from "@/components/layout/top-bar";
+import { DepartamentoProvider } from "@/components/departamento-context";
 import { verifySession } from "@/lib/dal";
 
 export default async function DashboardLayout({
@@ -12,12 +13,17 @@ export default async function DashboardLayout({
   const session = await verifySession();
 
   return (
-    <SidebarProvider>
-      <AppSidebar userIdentificador={session.identificador} />
-      <SidebarInset>
-        <TopBar departamentoActivo={session.departamento_activo} />
-        <div className="flex-1 p-6">{children}</div>
-      </SidebarInset>
-    </SidebarProvider>
+    <DepartamentoProvider value={session.departamento_activo}>
+      <SidebarProvider>
+        <AppSidebar userIdentificador={session.identificador} />
+        <SidebarInset>
+          <TopBar
+          departamentoActivo={session.departamento_activo}
+          departamentoFijo={session.departamento_fijo}
+        />
+          <div className="flex-1 p-6">{children}</div>
+        </SidebarInset>
+      </SidebarProvider>
+    </DepartamentoProvider>
   );
 }

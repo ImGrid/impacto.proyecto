@@ -8,6 +8,7 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
 import { normalizarCI } from '../common/helpers';
+import { ensureZonaEnDepartamento } from '../common/auth/zona-departamento.helper';
 import {
   CreateRecolectorDto,
   UpdateRecolectorDto,
@@ -47,6 +48,14 @@ export class RecolectoresService {
         'El recolector debe crearse en el departamento activo de la sesión',
       );
     }
+
+    // La zona elegida debe pertenecer al departamento del recolector
+    // (coherencia del departamento_id denormalizado — doc 19 §5.2).
+    await ensureZonaEnDepartamento(
+      this.prisma,
+      dto.zona_id,
+      dto.departamento_id,
+    );
 
     const password_hash = await argon2.hash(dto.password);
     const ciNormalizado = normalizarCI(dto.cedula_identidad);
@@ -219,6 +228,16 @@ export class RecolectoresService {
     ) {
       throw new BadRequestException(
         'No se puede mover el recolector a otro departamento desde esta sesión',
+      );
+    }
+
+    // Si cambia la zona y/o el departamento, deben seguir siendo coherentes
+    // entre sí (zona -> ciudad -> departamento).
+    if (dto.zona_id !== undefined || dto.departamento_id !== undefined) {
+      await ensureZonaEnDepartamento(
+        this.prisma,
+        dto.zona_id ?? recolector.zona_id,
+        dto.departamento_id ?? recolector.departamento_id,
       );
     }
 

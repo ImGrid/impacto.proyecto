@@ -92,8 +92,9 @@ export class TransaccionesController {
     @Body() dto: UpdateTransaccionDto,
     @CurrentUser('userId') userId: number,
     @CurrentUser('rol') rol: rol_usuario,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.transaccionesService.update(id, dto, userId, rol);
+    return this.transaccionesService.update(id, dto, userId, rol, departamentoActivo);
   }
 
   // Edición admin: corrige campos sin avanzar estado.

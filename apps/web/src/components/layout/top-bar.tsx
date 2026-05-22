@@ -53,9 +53,12 @@ function getLabel(segment: string): string {
 
 interface TopBarProps {
   departamentoActivo: number | null;
+  // true = admin asignado a un departamento fijo: se muestra el nombre pero
+  // sin selector. false = admin global: se muestra el switcher.
+  departamentoFijo: boolean;
 }
 
-export function TopBar({ departamentoActivo }: TopBarProps) {
+export function TopBar({ departamentoActivo, departamentoFijo }: TopBarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -139,29 +142,40 @@ export function TopBar({ departamentoActivo }: TopBarProps) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      {/* Switcher de departamento activo. Aparece a la derecha del topbar. */}
+      {/* Departamento activo. Para el admin global es un switcher; para un
+          admin asignado a un departamento fijo, solo el nombre (sin cambiar). */}
       <div className="ml-auto flex items-center gap-2">
         {isPending ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : (
           <Building2 className="h-4 w-4 text-muted-foreground" />
         )}
-        <Select
-          value={departamentoActivo ? String(departamentoActivo) : ""}
-          onValueChange={handleDepartamentoChange}
-          disabled={isPending || departamentos.length === 0}
-        >
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Departamento" />
-          </SelectTrigger>
-          <SelectContent>
-            {departamentos.map((d) => (
-              <SelectItem key={d.id} value={String(d.id)}>
-                {d.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {departamentoFijo ? (
+          <span
+            className="text-sm font-medium px-3 py-1.5"
+            title="Está asignado a este departamento"
+          >
+            {departamentos.find((d) => d.id === departamentoActivo)?.nombre ??
+              "Departamento"}
+          </span>
+        ) : (
+          <Select
+            value={departamentoActivo ? String(departamentoActivo) : ""}
+            onValueChange={handleDepartamentoChange}
+            disabled={isPending || departamentos.length === 0}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Departamento" />
+            </SelectTrigger>
+            <SelectContent>
+              {departamentos.map((d) => (
+                <SelectItem key={d.id} value={String(d.id)}>
+                  {d.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
     </header>
   );

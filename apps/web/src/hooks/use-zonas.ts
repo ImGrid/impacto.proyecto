@@ -25,10 +25,21 @@ type UseZonasParams = {
   sortOrder?: "asc" | "desc";
   search?: string;
   activo?: boolean;
+  // Acota la lista a las zonas de un departamento concreto. Se usa en los
+  // formularios de eventos y notificaciones para que el admin solo elija
+  // zonas de su departamento activo.
+  departamentoId?: number;
 };
 
 export function useZonas(params: UseZonasParams = {}) {
-  const { page = 1, limit = 10, sortOrder = "asc", search, activo } = params;
+  const {
+    page = 1,
+    limit = 10,
+    sortOrder = "asc",
+    search,
+    activo,
+    departamentoId,
+  } = params;
 
   const searchParams = new URLSearchParams();
   searchParams.set("page", String(page));
@@ -36,9 +47,18 @@ export function useZonas(params: UseZonasParams = {}) {
   searchParams.set("sortOrder", sortOrder);
   if (search) searchParams.set("search", search);
   if (activo !== undefined) searchParams.set("activo", String(activo));
+  if (departamentoId !== undefined)
+    searchParams.set("departamento_id", String(departamentoId));
 
   return useQuery({
-    queryKey: zonasKeys.list({ page, limit, sortOrder, search, activo }),
+    queryKey: zonasKeys.list({
+      page,
+      limit,
+      sortOrder,
+      search,
+      activo,
+      departamentoId,
+    }),
     queryFn: () =>
       clientGet<PaginatedResponse<Zona>>(`/zonas?${searchParams.toString()}`),
     placeholderData: keepPreviousData,

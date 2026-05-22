@@ -33,11 +33,13 @@ export class TiposGeneradorController {
   }
 
   @Get()
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
   findAll(@Query() query: TipoGeneradorQueryDto) {
     return this.tiposGeneradorService.findAll(query);
   }
 
   @Get(':id')
+  @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.tiposGeneradorService.findOne(id);
   }

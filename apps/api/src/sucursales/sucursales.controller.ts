@@ -56,8 +56,9 @@ export class SucursalesController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser('departamento_activo') departamentoActivo: number | null,
     @CurrentUser('rol') userRol: rol_usuario,
+    @CurrentUser('userId') userId: number,
   ) {
-    return this.sucursalesService.findOne(id, departamentoActivo, userRol);
+    return this.sucursalesService.findOne(id, departamentoActivo, userRol, userId);
   }
 
   @Patch(':id/horarios')

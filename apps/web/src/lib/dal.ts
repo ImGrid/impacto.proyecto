@@ -14,6 +14,9 @@ export type SessionUser = {
   // generador, que no aplica al panel web; para admin siempre debe haber
   // uno seleccionado al hacer login.
   departamento_activo: number | null;
+  // true = el admin está asignado a un departamento fijo y NO puede usar el
+  // switcher. false = admin global (puede cambiar de departamento).
+  departamento_fijo: boolean;
 };
 
 // Se ejecuta una sola vez por request gracias a cache()
@@ -44,11 +47,16 @@ export const verifySession = cache(async (): Promise<SessionUser> => {
     const departamentoActivo =
       typeof deptoRaw === "number" ? deptoRaw : null;
 
+    const deptoFijoRaw = payload.departamento_fijo;
+    const departamentoFijo =
+      typeof deptoFijoRaw === "boolean" ? deptoFijoRaw : false;
+
     return {
       userId: Number(payload.sub),
       identificador: String(payload.identificador),
       rol: String(payload.rol),
       departamento_activo: departamentoActivo,
+      departamento_fijo: departamentoFijo,
     };
   } catch {
     // JWT malformado o corrupto
