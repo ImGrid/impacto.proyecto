@@ -3,6 +3,8 @@
 import { useEffect } from "react";
 import L from "leaflet";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { useDepartamentoActivo } from "@/components/departamento-context";
+import { centroDepartamento } from "@/config/departamento-centros";
 
 const defaultIcon = L.icon({
   iconUrl: "/leaflet/marker-icon.png",
@@ -14,8 +16,6 @@ const defaultIcon = L.icon({
   shadowSize: [41, 41],
 });
 
-// Centro de Cochabamba
-const COCHABAMBA_CENTER: L.LatLngExpression = [-17.3895, -66.1568];
 const DEFAULT_ZOOM = 13;
 
 type RecolectorMapItem = {
@@ -65,9 +65,15 @@ export default function RecolectoresMapView({
     (r) => r.latitud != null && r.longitud != null,
   );
 
+  // Centro inicial = capital del departamento activo. Si hay datos con
+  // coordenadas, FitBounds reencuadra el mapa a los marcadores.
+  const departamentoActivo = useDepartamentoActivo();
+  const center = centroDepartamento(departamentoActivo);
+
   return (
     <MapContainer
-      center={COCHABAMBA_CENTER}
+      key={String(departamentoActivo)}
+      center={center}
       zoom={DEFAULT_ZOOM}
       className="h-[500px] w-full rounded-md border"
       style={{ zIndex: 0 }}

@@ -4,9 +4,9 @@ import { useEffect } from "react";
 import L from "leaflet";
 import { MapContainer, TileLayer, Circle, Popup, useMap } from "react-leaflet";
 import type { Zona } from "@/types/api";
+import { useDepartamentoActivo } from "@/components/departamento-context";
+import { centroDepartamento } from "@/config/departamento-centros";
 
-// Centro de Cochabamba
-const COCHABAMBA_CENTER: L.LatLngExpression = [-17.3895, -66.1568];
 const DEFAULT_ZOOM = 13;
 
 interface ZonasMapViewProps {
@@ -43,9 +43,15 @@ export default function ZonasMapView({ zonas }: ZonasMapViewProps) {
     (z) => z.latitud != null && z.longitud != null,
   );
 
+  // Centro inicial = capital del departamento activo. Si hay zonas con
+  // coordenadas, FitBounds reencuadra el mapa a ellas.
+  const departamentoActivo = useDepartamentoActivo();
+  const center = centroDepartamento(departamentoActivo);
+
   return (
     <MapContainer
-      center={COCHABAMBA_CENTER}
+      key={String(departamentoActivo)}
+      center={center}
       zoom={DEFAULT_ZOOM}
       className="h-[500px] w-full rounded-md border"
       style={{ zIndex: 0 }}

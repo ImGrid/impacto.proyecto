@@ -10,6 +10,8 @@ import {
   useMap,
   useMapEvents,
 } from "react-leaflet";
+import { useDepartamentoActivo } from "@/components/departamento-context";
+import { centroDepartamento } from "@/config/departamento-centros";
 
 // Fix Leaflet default marker icon (broken in webpack/Next.js)
 const defaultIcon = L.icon({
@@ -22,8 +24,6 @@ const defaultIcon = L.icon({
   shadowSize: [41, 41],
 });
 
-// Centro de Cochabamba
-const COCHABAMBA_CENTER: L.LatLngExpression = [-17.3895, -66.1568];
 const DEFAULT_ZOOM = 13;
 
 interface MapPickerProps {
@@ -80,6 +80,11 @@ export default function MapPicker({
   radiusKm,
   onPositionChange,
 }: MapPickerProps) {
+  // Centro inicial cuando aún no hay posición = capital del departamento
+  // activo (antes era siempre Cochabamba).
+  const departamentoActivo = useDepartamentoActivo();
+  const centroInicial = centroDepartamento(departamentoActivo);
+
   const handleDragEnd = useCallback(
     (e: L.DragEndEvent) => {
       const marker = e.target as L.Marker;
@@ -91,7 +96,7 @@ export default function MapPicker({
 
   return (
     <MapContainer
-      center={position ? [position.lat, position.lng] : COCHABAMBA_CENTER}
+      center={position ? [position.lat, position.lng] : centroInicial}
       zoom={position ? 14 : DEFAULT_ZOOM}
       className="h-[300px] w-full rounded-md border"
       style={{ zIndex: 0 }}
