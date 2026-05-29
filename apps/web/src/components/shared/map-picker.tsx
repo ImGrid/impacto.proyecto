@@ -107,7 +107,14 @@ function AddressSearch({
     if (!GEOAPIFY_API_KEY) return;
 
     const provider = new GeoapifyProvider({
-      params: { apiKey: GEOAPIFY_API_KEY },
+      params: {
+        apiKey: GEOAPIFY_API_KEY,
+        // Restringe los resultados SOLO a Bolivia (ISO 3166-1 alpha-2, en
+        // minúscula). Sin esto el geocoder busca en todo el mundo.
+        filter: "countrycode:bo",
+        // Resultados en español.
+        lang: "es",
+      },
     });
 
     const control = GeoSearchControl({
