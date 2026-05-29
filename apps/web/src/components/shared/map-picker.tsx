@@ -10,8 +10,14 @@ import {
   useMap,
   useMapEvents,
 } from "react-leaflet";
+import { GeoSearchControl, GeoapifyProvider } from "leaflet-geosearch";
 import { useDepartamentoActivo } from "@/components/departamento-context";
 import { centroDepartamento } from "@/config/departamento-centros";
+
+// API key de Geoapify (geocoding). Se inyecta en build (NEXT_PUBLIC_*).
+// Si no está definida, el buscador de direcciones simplemente no se muestra
+// y el mapa sigue funcionando con click/arrastre como antes.
+const GEOAPIFY_API_KEY = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY;
 
 // Fix Leaflet default marker icon (broken in webpack/Next.js)
 const defaultIcon = L.icon({
@@ -75,6 +81,68 @@ function FlyToPosition({
   return null;
 }
 
+/**
+ * Buscador de direcciones (geocoding con Geoapify) montado como control del
+ * mapa. Al elegir un resultado, centra el mapa (lo hace el propio control vía
+ * `updateMap`) y propaga las coordenadas al formulario con `onPositionChange`,
+ * de modo que se reutiliza el marcador draggable del MapPicker (por eso el
+ * control va con `showMarker: false`, para no duplicar marcadores).
+ *
+ * Si no hay API key configurada, no monta nada.
+ */
+function AddressSearch({
+  onPositionChange,
+}: {
+  onPositionChange: (lat: number, lng: number) => void;
+}) {
+  const map = useMap();
+  // Ref para usar siempre la última callback sin re-montar el control en cada
+  // render (onPositionChange viene del form y no está memoizada).
+  const onPositionChangeRef = useRef(onPositionChange);
+  useEffect(() => {
+    onPositionChangeRef.current = onPositionChange;
+  });
+
+  useEffect(() => {
+    if (!GEOAPIFY_API_KEY) return;
+
+    const provider = new GeoapifyProvider({
+      params: { apiKey: GEOAPIFY_API_KEY },
+    });
+
+    const control = GeoSearchControl({
+      provider,
+      style: "bar",
+      showMarker: false, // se usa el marcador draggable propio del MapPicker
+      showPopup: false,
+      autoComplete: true,
+      autoCompleteDelay: 250,
+      searchLabel: "Buscar dirección...",
+      notFoundMessage: "No se encontró la dirección.",
+      keepResult: true,
+    });
+
+    map.addControl(control);
+
+    function handleShowLocation(e: L.LeafletEvent) {
+      // El evento trae el resultado en `location` con x=lon, y=lat.
+      const { x, y } = (
+        e as unknown as { location: { x: number; y: number } }
+      ).location;
+      onPositionChangeRef.current(y, x);
+    }
+
+    map.on("geosearch/showlocation", handleShowLocation);
+
+    return () => {
+      map.off("geosearch/showlocation", handleShowLocation);
+      map.removeControl(control);
+    };
+  }, [map]);
+
+  return null;
+}
+
 export default function MapPicker({
   position,
   radiusKm,
@@ -108,6 +176,7 @@ export default function MapPicker({
       <ClickHandler onPositionChange={onPositionChange} />
       <InvalidateSizeOnMount />
       <FlyToPosition position={position} />
+      <AddressSearch onPositionChange={onPositionChange} />
 
       {position && (
         <>
