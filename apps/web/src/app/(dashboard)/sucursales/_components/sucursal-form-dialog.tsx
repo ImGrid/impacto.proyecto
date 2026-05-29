@@ -1,9 +1,10 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, MapPin, Plus, Trash2 } from "lucide-react";
 import { useCreateSucursal, useUpdateSucursal } from "@/hooks/use-sucursales";
 import { useGeneradores } from "@/hooks/use-generadores";
 import { useZonas } from "@/hooks/use-zonas";
@@ -40,6 +41,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+
+const MapPicker = dynamic(() => import("@/components/shared/map-picker"), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[300px] w-full rounded-md" />,
+});
 
 const materialRowSchema = z.object({
   material_id: z.string().min(1, "Seleccione un material"),
@@ -62,8 +69,8 @@ const formSchema = z.object({
     .string()
     .min(1, "La dirección es obligatoria")
     .max(255, "Máximo 255 caracteres"),
-  latitud: z.string().min(1, "La latitud es obligatoria"),
-  longitud: z.string().min(1, "La longitud es obligatoria"),
+  latitud: z.number({ error: "La latitud es obligatoria" }).min(-90).max(90),
+  longitud: z.number({ error: "La longitud es obligatoria" }).min(-180).max(180),
   zona_id: z.string().min(1, "Seleccione una zona"),
   materiales: z.array(materialRowSchema).optional(),
   horarios: z.array(horarioRowSchema).optional(),
@@ -168,8 +175,14 @@ function SucursalForm({
       generador_id: sucursal ? String(sucursal.generador_id) : "",
       nombre: sucursal?.nombre ?? "",
       direccion: sucursal?.direccion ?? "",
-      latitud: sucursal ? String(sucursal.latitud) : "",
-      longitud: sucursal ? String(sucursal.longitud) : "",
+      latitud:
+        sucursal != null
+          ? Number(sucursal.latitud)
+          : (undefined as unknown as number),
+      longitud:
+        sucursal != null
+          ? Number(sucursal.longitud)
+          : (undefined as unknown as number),
       zona_id: sucursal ? String(sucursal.zona_id) : "",
       materiales:
         sucursal?.sucursal_material.map((sm) => ({
@@ -195,6 +208,23 @@ function SucursalForm({
     name: "horarios",
   });
 
+  const latitud = form.watch("latitud");
+  const longitud = form.watch("longitud");
+
+  const mapPosition =
+    latitud != null && longitud != null
+      ? { lat: latitud, lng: longitud }
+      : null;
+
+  function handlePositionChange(lat: number, lng: number) {
+    form.setValue("latitud", parseFloat(lat.toFixed(8)), {
+      shouldValidate: true,
+    });
+    form.setValue("longitud", parseFloat(lng.toFixed(8)), {
+      shouldValidate: true,
+    });
+  }
+
   function onSubmit(data: FormValues) {
     const materiales = data.materiales?.length
       ? data.materiales.map((m) => ({
@@ -216,8 +246,8 @@ function SucursalForm({
     const shared = {
       nombre: data.nombre,
       direccion: data.direccion,
-      latitud: Number(data.latitud),
-      longitud: Number(data.longitud),
+      latitud: data.latitud,
+      longitud: data.longitud,
       zona_id: Number(data.zona_id),
       ...(materiales !== undefined ? { materiales } : {}),
       ...(horarios !== undefined ? { horarios } : {}),
@@ -309,46 +339,33 @@ function SucursalForm({
           )}
         />
 
-        <div className="grid grid-cols-2 gap-4">
-          <FormField
-            control={form.control}
-            name="latitud"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Latitud</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    step="any"
-                    placeholder="-17.3935"
-                    disabled={isPending}
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
+        {/* Mapa para seleccionar ubicación */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Ubicación en el mapa</span>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Haga click en el mapa para marcar la ubicación de la sucursal.
+            Puede arrastrar el marcador para ajustar la posición.
+          </p>
+          <MapPicker
+            position={mapPosition}
+            radiusKm={0}
+            onPositionChange={handlePositionChange}
           />
-
-          <FormField
-            control={form.control}
-            name="longitud"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Longitud</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    step="any"
-                    placeholder="-66.1570"
-                    disabled={isPending}
-                    {...field}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          {mapPosition ? (
+            <p className="text-muted-foreground text-xs">
+              Lat: {mapPosition.lat.toFixed(6)}, Lng:{" "}
+              {mapPosition.lng.toFixed(6)}
+            </p>
+          ) : (
+            <p className="text-destructive text-xs">
+              {form.formState.errors.latitud?.message ??
+                form.formState.errors.longitud?.message ??
+                ""}
+            </p>
+          )}
         </div>
 
         <FormField

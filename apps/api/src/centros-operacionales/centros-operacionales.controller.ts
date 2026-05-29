@@ -35,7 +35,12 @@ export class CentrosOperacionalesController {
     return this.centrosOperacionalesService.create(dto, departamentoActivo);
   }
 
+  // El RECOLECTOR necesita listar los centros operacionales de su
+  // departamento para elegirlos como destino al registrar una recolección
+  // (cambio definitivo). El filtro por departamento ya se aplica con el
+  // `departamento_activo` que el JWT del recolector lleva.
   @Get()
+  @Roles(rol_usuario.ADMIN, rol_usuario.RECOLECTOR)
   findAll(
     @Query() query: CentroOperacionalQueryDto,
     @CurrentUser('departamento_activo') departamentoActivo: number | null,
