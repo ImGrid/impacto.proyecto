@@ -266,19 +266,29 @@ export class RecolectoresService {
         ? await this.imageStorage.saveFromBase64(dto.foto_base64, 'recolectores')
         : undefined;
 
+    // Cambio a aplicar en foto_url: nueva ruta (reemplazo), null (eliminar) o
+    // undefined (no tocar). El reemplazo tiene prioridad sobre eliminar.
+    const fotoUrlNuevo: string | null | undefined =
+      nuevaFotoUrl !== undefined
+        ? nuevaFotoUrl
+        : dto.foto_eliminar
+          ? null
+          : undefined;
+
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-      // Extract relation arrays, activo y foto_base64 from dto. foto_base64 NO
-      // es columna: se procesó aparte y se persiste como foto_url.
-      const { dias_trabajo, materiales, tipos_generador_ids, activo, foto_base64, ...recolectorData } = dto;
+      // Extract relation arrays, activo, foto_base64 y foto_eliminar from dto:
+      // no son columnas (la foto se persiste aparte como foto_url).
+      const { dias_trabajo, materiales, tipos_generador_ids, activo, foto_base64, foto_eliminar, ...recolectorData } = dto;
       void foto_base64;
+      void foto_eliminar;
 
-      // Update recolector fields if any. Si cambió la zona, también se
-      // actualiza el departamento_id derivado. Si se subió foto, se setea foto_url.
+      // Update recolector fields if any. Si cambió la zona se re-deriva el
+      // departamento_id. Si se subió/eliminó la foto, se setea/limpia foto_url.
       if (
         Object.keys(recolectorData).length > 0 ||
         departamentoIdNuevo !== undefined ||
-        nuevaFotoUrl !== undefined
+        fotoUrlNuevo !== undefined
       ) {
         await tx.recolector.update({
           where: { id },
@@ -287,7 +297,7 @@ export class RecolectoresService {
             ...(departamentoIdNuevo !== undefined
               ? { departamento_id: departamentoIdNuevo }
               : {}),
-            ...(nuevaFotoUrl !== undefined ? { foto_url: nuevaFotoUrl } : {}),
+            ...(fotoUrlNuevo !== undefined ? { foto_url: fotoUrlNuevo } : {}),
           },
         });
       }
@@ -361,8 +371,9 @@ export class RecolectoresService {
         });
       });
 
-      // Éxito: si se reemplazó la foto, borrar la anterior.
-      if (nuevaFotoUrl && oldFotoUrl && oldFotoUrl !== nuevaFotoUrl) {
+      // Éxito: borrar el archivo anterior si se reemplazó (nueva ruta) o se
+      // eliminó (fotoUrlNuevo = null) la foto.
+      if (fotoUrlNuevo !== undefined && oldFotoUrl && oldFotoUrl !== fotoUrlNuevo) {
         await this.imageStorage.deleteByPublicPath(oldFotoUrl);
       }
       return result;

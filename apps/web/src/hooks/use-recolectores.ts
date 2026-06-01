@@ -186,6 +186,7 @@ export function useUpdateRecolector() {
         asociacion_id?: number;
         trabaja_individual?: boolean;
         foto_base64?: string;
+        foto_eliminar?: boolean;
         dias_trabajo?: DiaSemana[];
         materiales?: RecolectorMaterialInput[];
         tipos_generador_ids?: number[];

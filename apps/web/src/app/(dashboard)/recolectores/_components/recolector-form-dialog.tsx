@@ -140,6 +140,8 @@ const baseSchema = z.object({
   // Foto de perfil en base64 (data URL). Vacío = sin cambios. Solo se envía
   // cuando el admin selecciona una imagen nueva.
   foto_base64: z.string().optional(),
+  // Marca para eliminar la foto actual (solo edición). Excluyente con foto_base64.
+  foto_eliminar: z.boolean().optional(),
   dias_trabajo: z.array(z.string()).optional(),
   materiales: z.array(materialRowSchema).optional(),
   tipos_generador_ids: z.array(z.string()).optional(),
@@ -302,6 +304,7 @@ function RecolectorForm({
       edad: recolector ? String(recolector.edad) : "",
       trabaja_individual: recolector?.trabaja_individual ?? true,
       foto_base64: "",
+      foto_eliminar: false,
       dias_trabajo:
         recolector?.recolector_dia_trabajo.map((d) => d.dia_semana) ?? [],
       materiales:
@@ -347,9 +350,12 @@ function RecolectorForm({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fotoBase64 = form.watch("foto_base64");
-  // Preview: la imagen recién elegida (data URL) tiene prioridad sobre la foto
-  // actual del recolector (en edición). fotoSrc construye la URL absoluta.
-  const fotoPreview = fotoBase64 || fotoSrc(recolector?.foto_url);
+  const fotoEliminar = form.watch("foto_eliminar");
+  // Preview: la imagen recién elegida (data URL) manda; si se marcó eliminar,
+  // no se muestra nada; si no, la foto actual del recolector (en edición).
+  const fotoPreview = fotoBase64 || (fotoEliminar ? "" : fotoSrc(recolector?.foto_url));
+  // ¿Hay una foto que se pueda quitar? (una nueva seleccionada o la existente).
+  const tieneFoto = !!fotoBase64 || (!fotoEliminar && !!recolector?.foto_url);
 
   function handleFotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -363,17 +369,22 @@ function RecolectorForm({
       return;
     }
     const reader = new FileReader();
-    reader.onload = () =>
-      form.setValue("foto_base64", reader.result as string, {
-        shouldDirty: true,
-      });
+    reader.onload = () => {
+      form.setValue("foto_base64", reader.result as string, { shouldDirty: true });
+      // Elegir una imagen nueva cancela una eliminación pendiente.
+      form.setValue("foto_eliminar", false, { shouldDirty: true });
+    };
     reader.onerror = () => toast.error("No se pudo leer la imagen.");
     reader.readAsDataURL(file);
   }
 
-  // Descarta la imagen recién seleccionada (vuelve a la foto previa o a vacío).
-  function quitarFotoNueva() {
+  // Quita la foto: si había una selección nueva la descarta; si el recolector
+  // ya tenía foto guardada, la marca para eliminar al guardar.
+  function quitarFoto() {
     form.setValue("foto_base64", "", { shouldDirty: true });
+    if (recolector?.foto_url) {
+      form.setValue("foto_eliminar", true, { shouldDirty: true });
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -434,7 +445,11 @@ function RecolectorForm({
 
     if (isEditing) {
       updateMutation.mutate(
-        { id: recolector.id, data: shared },
+        {
+          id: recolector.id,
+          // foto_eliminar solo aplica en edición (el DTO de creación no lo acepta).
+          data: { ...shared, ...(data.foto_eliminar ? { foto_eliminar: true } : {}) },
+        },
         { onSuccess: () => onClose() },
       );
     } else {
@@ -537,12 +552,12 @@ function RecolectorForm({
                   <Camera className="mr-1 h-3 w-3" />
                   {fotoPreview ? "Cambiar foto" : "Subir foto"}
                 </Button>
-                {fotoBase64 ? (
+                {tieneFoto ? (
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={quitarFotoNueva}
+                    onClick={quitarFoto}
                     disabled={isPending}
                   >
                     <X className="mr-1 h-3 w-3" />
