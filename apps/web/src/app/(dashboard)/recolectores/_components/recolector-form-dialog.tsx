@@ -25,6 +25,7 @@ import type {
   UnidadMedida,
   Zona,
 } from "@/types/api";
+import { normalizarParaComparar } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -81,8 +82,14 @@ const unidadLabels: Record<UnidadMedida, string> = {
 
 // --- Zod Schema ---
 
+// Valor centinela del Select de material: registra un "Otro" de texto libre.
+const MATERIAL_OTRO = "__otro__";
+
 const materialRowSchema = z.object({
   material_id: z.string().min(1, "Seleccione un material"),
+  // Solo se usan cuando material_id === MATERIAL_OTRO.
+  nombre_personalizado: z.string().max(100, "Máximo 100 caracteres").optional(),
+  unidad_medida: z.enum(["KG", "UNIDAD", "BOLSA", "TONELADA"]).optional(),
   cantidad_mensual: z.string().optional(),
   precio_venta: z.string().optional(),
   es_principal: z.boolean().optional(),
@@ -117,6 +124,32 @@ const baseSchema = z.object({
   dias_trabajo: z.array(z.string()).optional(),
   materiales: z.array(materialRowSchema).optional(),
   tipos_generador_ids: z.array(z.string()).optional(),
+}).superRefine((data, ctx) => {
+  // "Otro": nombre obligatorio y sin duplicados (normalizado: ignora
+  // mayúsculas, acentos y espacios).
+  const otrosVistos = new Map<string, number>();
+  data.materiales?.forEach((m, i) => {
+    if (m.material_id !== MATERIAL_OTRO) return;
+    const nombre = m.nombre_personalizado?.trim();
+    if (!nombre) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["materiales", i, "nombre_personalizado"],
+        message: "Escriba qué material es",
+      });
+      return;
+    }
+    const clave = normalizarParaComparar(nombre);
+    if (otrosVistos.has(clave)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["materiales", i, "nombre_personalizado"],
+        message: 'Ya agregó un material "Otro" con ese nombre',
+      });
+    } else {
+      otrosVistos.set(clave, i);
+    }
+  });
 });
 
 const createSchema = baseSchema
@@ -253,7 +286,11 @@ function RecolectorForm({
         recolector?.recolector_dia_trabajo.map((d) => d.dia_semana) ?? [],
       materiales:
         recolector?.recolector_material.map((rm) => ({
-          material_id: String(rm.material_id),
+          // Si la línea no tiene material de catálogo es un "Otro".
+          material_id:
+            rm.material_id != null ? String(rm.material_id) : MATERIAL_OTRO,
+          nombre_personalizado: rm.nombre_personalizado ?? "",
+          unidad_medida: (rm.unidad_medida ?? "KG") as UnidadMedida,
           cantidad_mensual:
             rm.cantidad_mensual != null ? String(rm.cantidad_mensual) : "",
           precio_venta: rm.precio_venta != null ? String(rm.precio_venta) : "",
@@ -293,7 +330,13 @@ function RecolectorForm({
 
     const materiales = data.materiales?.length
       ? data.materiales.map((m) => ({
-          material_id: Number(m.material_id),
+          // Catálogo (material_id) o "Otro" (nombre_personalizado + unidad).
+          ...(m.material_id === MATERIAL_OTRO
+            ? {
+                nombre_personalizado: m.nombre_personalizado?.trim(),
+                unidad_medida: m.unidad_medida,
+              }
+            : { material_id: Number(m.material_id) }),
           ...(m.cantidad_mensual
             ? { cantidad_mensual: Number(m.cantidad_mensual) }
             : {}),
@@ -750,6 +793,8 @@ function RecolectorForm({
               onClick={() =>
                 append({
                   material_id: "",
+                  nombre_personalizado: "",
+                  unidad_medida: "KG",
                   cantidad_mensual: "",
                   precio_venta: "",
                   es_principal: false,
@@ -779,11 +824,13 @@ function RecolectorForm({
                 <span></span>
               </div>
 
-              {fields.map((field, index) => (
-                <div
-                  key={field.id}
-                  className="grid grid-cols-[1fr_5rem_5rem_4.5rem_2rem] gap-2 items-start"
-                >
+              {fields.map((field, index) => {
+                const esOtro =
+                  form.watch(`materiales.${index}.material_id`) ===
+                  MATERIAL_OTRO;
+                return (
+                  <div key={field.id} className="space-y-1.5">
+                    <div className="grid grid-cols-[1fr_5rem_5rem_4.5rem_2rem] gap-2 items-start">
                   <FormField
                     control={form.control}
                     name={`materiales.${index}.material_id`}
@@ -805,6 +852,9 @@ function RecolectorForm({
                                 {mat.nombre}
                               </SelectItem>
                             ))}
+                            <SelectItem value={MATERIAL_OTRO}>
+                              Otro (especificar)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -889,8 +939,61 @@ function RecolectorForm({
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
-                </div>
-              ))}
+                    </div>
+
+                    {/* Nombre + unidad cuando la línea es "Otro". */}
+                    {esOtro && (
+                      <div className="flex items-start gap-2 pl-0.5">
+                        <FormField
+                          control={form.control}
+                          name={`materiales.${index}.nombre_personalizado`}
+                          render={({ field: inputField }) => (
+                            <FormItem className="flex-1">
+                              <FormControl>
+                                <Input
+                                  placeholder="¿Qué material es? (ej: Pilas...)"
+                                  disabled={isPending}
+                                  {...inputField}
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`materiales.${index}.unidad_medida`}
+                          render={({ field: selectField }) => (
+                            <FormItem className="w-28">
+                              <Select
+                                onValueChange={selectField.onChange}
+                                value={selectField.value}
+                                disabled={isPending}
+                              >
+                                <FormControl>
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  {(
+                                    Object.keys(unidadLabels) as UnidadMedida[]
+                                  ).map((u) => (
+                                    <SelectItem key={u} value={u}>
+                                      {unidadLabels[u]}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </fieldset>

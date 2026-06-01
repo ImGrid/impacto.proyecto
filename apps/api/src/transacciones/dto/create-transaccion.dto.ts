@@ -15,9 +15,21 @@ import {
 import { estado_transaccion, unidad_medida } from '@prisma/client';
 
 export class DetalleTransaccionDto {
+  // Material del catálogo. Opcional: una línea puede registrarse como un
+  // "Otro" de texto libre (`nombre_personalizado`) cuando el material no
+  // está en el catálogo del departamento. El service valida que venga
+  // EXACTAMENTE uno de los dos (material_id XOR nombre_personalizado),
+  // igual que el CHECK de BD `chk_detalle_material_xor_otro`.
+  @IsOptional()
   @IsInt()
   @Type(() => Number)
-  material_id: number;
+  material_id?: number;
+
+  // Nombre del material cuando es un "Otro" (no está en el catálogo).
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  nombre_personalizado?: string;
 
   // Opcional a nivel DTO porque el GENERADOR puede registrar materiales
   // sin pesarlos (solo avisa que tiene determinado tipo de residuo). Los

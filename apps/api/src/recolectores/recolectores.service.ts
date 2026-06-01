@@ -7,7 +7,7 @@ import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
-import { normalizarCI } from '../common/helpers';
+import { normalizarCI, normalizarParaComparar } from '../common/helpers';
 import {
   CreateRecolectorDto,
   UpdateRecolectorDto,
@@ -102,10 +102,13 @@ export class RecolectoresService {
 
       // 3. Materiales
       if (dto.materiales?.length) {
+        this.validarMaterialesOtro(dto.materiales);
         await tx.recolector_material.createMany({
           data: dto.materiales.map((m) => ({
             recolector_id: recolectorId,
-            material_id: m.material_id,
+            material_id: m.material_id ?? null,
+            nombre_personalizado: m.nombre_personalizado?.trim() || null,
+            unidad_medida: m.unidad_medida ?? null,
             cantidad_mensual: m.cantidad_mensual,
             precio_venta: m.precio_venta,
             es_principal: m.es_principal ?? false,
@@ -292,10 +295,13 @@ export class RecolectoresService {
           where: { recolector_id: id },
         });
         if (materiales.length > 0) {
+          this.validarMaterialesOtro(materiales);
           await tx.recolector_material.createMany({
             data: materiales.map((m) => ({
               recolector_id: id,
-              material_id: m.material_id,
+              material_id: m.material_id ?? null,
+              nombre_personalizado: m.nombre_personalizado?.trim() || null,
+              unidad_medida: m.unidad_medida ?? null,
               cantidad_mensual: m.cantidad_mensual,
               precio_venta: m.precio_venta,
               es_principal: m.es_principal ?? false,
@@ -331,5 +337,37 @@ export class RecolectoresService {
     await this.prisma.usuario.delete({
       where: { id: recolector.usuario_id },
     });
+  }
+
+  /**
+   * Valida que cada material del recolector sea O del catálogo (`material_id`)
+   * O un "Otro" de texto libre (`nombre_personalizado`), nunca ambos ni
+   * ninguno. Coincide con el CHECK de BD `chk_recmat_material_xor_otro`.
+   */
+  private validarMaterialesOtro(
+    materiales: { material_id?: number; nombre_personalizado?: string }[],
+  ): void {
+    // Nombres "Otro" ya vistos, normalizados (sin mayúsculas/acentos/espacios)
+    // para rechazar duplicados como "Pilas" / "pilas" / "Pílas".
+    const otrosVistos = new Set<string>();
+    for (const m of materiales) {
+      const tieneCatalogo = m.material_id != null;
+      const tieneOtro =
+        m.nombre_personalizado != null && m.nombre_personalizado.trim() !== '';
+      if (tieneCatalogo === tieneOtro) {
+        throw new BadRequestException(
+          'Cada material debe ser del catálogo o un "Otro" con nombre, no ambos ni ninguno',
+        );
+      }
+      if (tieneOtro) {
+        const clave = normalizarParaComparar(m.nombre_personalizado as string);
+        if (otrosVistos.has(clave)) {
+          throw new BadRequestException(
+            `Hay dos materiales "Otro" con el mismo nombre ("${(m.nombre_personalizado as string).trim()}"). Use un solo registro o nombres distintos.`,
+          );
+        }
+        otrosVistos.add(clave);
+      }
+    }
   }
 }

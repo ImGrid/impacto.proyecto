@@ -7,6 +7,7 @@ import {
 import { Prisma, rol_usuario } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
+import { normalizarParaComparar } from '../common/helpers';
 import {
   CreateSucursalDto,
   UpdateSucursalDto,
@@ -87,10 +88,13 @@ export class SucursalesService {
       });
 
       if (materiales?.length) {
+        this.validarMaterialesOtro(materiales);
         await tx.sucursal_material.createMany({
           data: materiales.map((m) => ({
             sucursal_id: sucursal.id,
-            material_id: m.material_id,
+            material_id: m.material_id ?? null,
+            nombre_personalizado: m.nombre_personalizado?.trim() || null,
+            unidad_medida: m.unidad_medida ?? null,
             cantidad_aproximada: m.cantidad_aproximada,
           })),
         });
@@ -275,10 +279,13 @@ export class SucursalesService {
           where: { sucursal_id: id },
         });
         if (materiales.length > 0) {
+          this.validarMaterialesOtro(materiales);
           await tx.sucursal_material.createMany({
             data: materiales.map((m) => ({
               sucursal_id: id,
-              material_id: m.material_id,
+              material_id: m.material_id ?? null,
+              nombre_personalizado: m.nombre_personalizado?.trim() || null,
+              unidad_medida: m.unidad_medida ?? null,
               cantidad_aproximada: m.cantidad_aproximada,
             })),
           });
@@ -338,5 +345,37 @@ export class SucursalesService {
         include: sucursalInclude,
       });
     });
+  }
+
+  /**
+   * Valida que cada material de la sucursal sea O del catálogo (`material_id`)
+   * O un "Otro" de texto libre (`nombre_personalizado`), nunca ambos ni
+   * ninguno. Coincide con el CHECK de BD `chk_sucmat_material_xor_otro`.
+   */
+  private validarMaterialesOtro(
+    materiales: { material_id?: number; nombre_personalizado?: string }[],
+  ): void {
+    // Nombres "Otro" ya vistos, normalizados (sin mayúsculas/acentos/espacios)
+    // para rechazar duplicados como "Pilas" / "pilas" / "Pílas".
+    const otrosVistos = new Set<string>();
+    for (const m of materiales) {
+      const tieneCatalogo = m.material_id != null;
+      const tieneOtro =
+        m.nombre_personalizado != null && m.nombre_personalizado.trim() !== '';
+      if (tieneCatalogo === tieneOtro) {
+        throw new BadRequestException(
+          'Cada material debe ser del catálogo o un "Otro" con nombre, no ambos ni ninguno',
+        );
+      }
+      if (tieneOtro) {
+        const clave = normalizarParaComparar(m.nombre_personalizado as string);
+        if (otrosVistos.has(clave)) {
+          throw new BadRequestException(
+            `Hay dos materiales "Otro" con el mismo nombre ("${(m.nombre_personalizado as string).trim()}"). Use un solo registro o nombres distintos.`,
+          );
+        }
+        otrosVistos.add(clave);
+      }
+    }
   }
 }

@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { clientGet, clientPost, clientPatch, clientDelete } from "@/lib/client-api";
-import type { Sucursal, FrecuenciaRecojo, DiaSemana, PaginatedResponse } from "@/types/api";
+import type { Sucursal, FrecuenciaRecojo, DiaSemana, PaginatedResponse, UnidadMedida } from "@/types/api";
 
 export const sucursalesKeys = {
   all: ["sucursales"] as const,
@@ -52,7 +52,10 @@ export function useSucursales(params: UseSucursalesParams = {}) {
 }
 
 type SucursalMaterialInput = {
-  material_id: number;
+  // Catálogo (material_id) o "Otro" (nombre_personalizado + unidad_medida).
+  material_id?: number;
+  nombre_personalizado?: string;
+  unidad_medida?: UnidadMedida;
   cantidad_aproximada?: string;
 };
 

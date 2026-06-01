@@ -54,6 +54,8 @@ export type Material = {
   factor_co2: number | null;
   activo: boolean;
   fecha_creacion: string;
+  // El catálogo de materiales es por departamento (cada depto tiene su lista).
+  departamento_id: number;
 };
 
 export type EstadoPrecio = "VIGENTE" | "POR_VENCER" | "VENCIDO";
@@ -157,12 +159,15 @@ export type FrecuenciaRecojo =
 export type SucursalMaterial = {
   id: number;
   sucursal_id: number;
-  material_id: number;
+  // null cuando es un "Otro" de texto libre (nombre_personalizado).
+  material_id: number | null;
+  nombre_personalizado: string | null;
+  unidad_medida: UnidadMedida | null;
   cantidad_aproximada: string | null;
   material: {
     id: number;
     nombre: string;
-  };
+  } | null;
 };
 
 export type SucursalHorario = {
@@ -210,14 +215,17 @@ export type DiaSemana =
 export type RecolectorMaterial = {
   id: number;
   recolector_id: number;
-  material_id: number;
+  // null cuando es un "Otro" de texto libre (nombre_personalizado).
+  material_id: number | null;
+  nombre_personalizado: string | null;
+  unidad_medida: UnidadMedida | null;
   cantidad_mensual: number | null;
   precio_venta: number | null;
   es_principal: boolean;
   material: {
     id: number;
     nombre: string;
-  };
+  } | null;
 };
 
 export type RecolectorTipoGenerador = {
@@ -330,7 +338,9 @@ export type EstadoTransaccion = "GENERADO" | "RECOLECTADO" | "ENTREGADO" | "PAGA
 export type DetalleTransaccion = {
   id: number;
   transaccion_id: number;
-  material_id: number;
+  // null cuando es un "Otro" de texto libre (nombre_personalizado).
+  material_id: number | null;
+  nombre_personalizado: string | null;
   cantidad: string;
   unidad_medida: string;
   precio_unitario: string;
@@ -342,7 +352,7 @@ export type DetalleTransaccion = {
   material: {
     id: number;
     nombre: string;
-  };
+  } | null;
   sucursal: {
     id: number;
     nombre: string;
@@ -418,7 +428,10 @@ export type TransaccionDetalle = Transaccion & {
 };
 
 export type CreateTransaccionDetalle = {
-  material_id: number;
+  // Material del catálogo (omitido si es un "Otro") o nombre libre. Debe venir
+  // exactamente uno de los dos; el backend valida el XOR.
+  material_id?: number;
+  nombre_personalizado?: string;
   cantidad: number;
   unidad_medida: UnidadMedida;
   precio_unitario?: number;

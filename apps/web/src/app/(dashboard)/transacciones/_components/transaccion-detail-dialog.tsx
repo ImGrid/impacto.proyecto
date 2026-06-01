@@ -279,7 +279,12 @@ export function TransaccionDetailDialog({
                   <tbody>
                     {transaccion.detalle_transaccion.map((d) => (
                       <tr key={d.id} className="border-b last:border-0">
-                        <td className="px-3 py-2">{d.material.nombre}</td>
+                        <td className="px-3 py-2">
+                          {d.material?.nombre ??
+                            (d.nombre_personalizado
+                              ? `${d.nombre_personalizado} (Otro)`
+                              : "—")}
+                        </td>
                         <td className="px-3 py-2">
                           {d.sucursal ? (
                             <span>

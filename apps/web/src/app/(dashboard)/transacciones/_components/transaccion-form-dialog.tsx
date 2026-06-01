@@ -74,8 +74,14 @@ interface TransaccionFormDialogProps {
 // polimórficos a partir de esta elección.
 type TipoDestino = "ninguno" | "centro_op" | "externo" | "desconocido";
 
+// Valor centinela del Select de material: registra un "Otro" de texto libre
+// (nombre escrito por el usuario) en lugar de un material del catálogo.
+const MATERIAL_OTRO = "__otro__";
+
 const baseDetalle = z.object({
   material_id: z.string().min(1, "Seleccione un material"),
+  // Solo se usa cuando material_id === MATERIAL_OTRO.
+  nombre_personalizado: z.string().max(100, "Máximo 100 caracteres").optional(),
   cantidad: z
     .string()
     .min(1, "Cantidad obligatoria")
@@ -109,6 +115,19 @@ function buildSchema(mode: FormMode) {
           message: "La fecha no puede ser futura",
         });
       }
+      // Si la línea es "Otro", el nombre del material es obligatorio.
+      data.detalles.forEach((d, i) => {
+        if (
+          d.material_id === MATERIAL_OTRO &&
+          !d.nombre_personalizado?.trim()
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["detalles", i, "nombre_personalizado"],
+            message: "Escriba qué material es",
+          });
+        }
+      });
       if (mode === "entrega") {
         // Precio obligatorio para cada material.
         data.detalles.forEach((d, i) => {
@@ -155,6 +174,7 @@ type FormValues = {
   acopiador_externo_id?: string;
   detalles: {
     material_id: string;
+    nombre_personalizado?: string;
     cantidad: string;
     unidad_medida: UnidadMedida;
     precio_unitario?: string;
@@ -164,6 +184,7 @@ type FormValues = {
 
 const defaultDetalle = {
   material_id: "",
+  nombre_personalizado: "",
   cantidad: "",
   unidad_medida: "KG" as UnidadMedida,
   precio_unitario: "",
@@ -227,7 +248,10 @@ export function TransaccionFormDialog({
       recolector_id: Number(data.recolector_id),
       observaciones: data.observaciones || undefined,
       detalles: data.detalles.map((d) => ({
-        material_id: Number(d.material_id),
+        // Catálogo (material_id) o "Otro" (nombre_personalizado), nunca ambos.
+        ...(d.material_id === MATERIAL_OTRO
+          ? { nombre_personalizado: d.nombre_personalizado?.trim() }
+          : { material_id: Number(d.material_id) }),
         cantidad: Number(d.cantidad),
         unidad_medida: d.unidad_medida,
         precio_unitario:
@@ -556,6 +580,9 @@ export function TransaccionFormDialog({
                                 {m.nombre}
                               </SelectItem>
                             ))}
+                            <SelectItem value={MATERIAL_OTRO}>
+                              Otro (especificar)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -650,6 +677,30 @@ export function TransaccionFormDialog({
                     </Button>
                   </div>
                 </div>
+
+                {/* Nombre libre cuando la línea es "Otro". */}
+                {form.watch(`detalles.${index}.material_id`) ===
+                  MATERIAL_OTRO && (
+                  <FormField
+                    control={form.control}
+                    name={`detalles.${index}.nombre_personalizado`}
+                    render={({ field: inputField }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">
+                          Nombre del material (Otro)
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="¿Qué material es? (ej: Pilas, Telgopor...)"
+                            disabled={isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
 
                 {/* Origen (sucursal) por línea — opcional. Permite indicar
                     desde qué sucursal vino este material específico cuando

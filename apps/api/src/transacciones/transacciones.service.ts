@@ -70,7 +70,9 @@ const TRANSICIONES_VALIDAS: Record<string, estado_transaccion[]> = {
 // Incluye sucursal_id para que el detalle del historial preserve el origen
 // aunque después se editen los detalles.
 type MaterialSnapshot = {
-  material_id: number;
+  // null cuando la línea es un "Otro" de texto libre (nombre_personalizado).
+  material_id: number | null;
+  nombre_personalizado?: string;
   cantidad: number;
   unidad_medida: string;
   precio_unitario: number | undefined;
@@ -335,9 +337,13 @@ export class TransaccionesService {
         }
       }
 
+      // Cada línea es material del catálogo o un "Otro" de texto libre.
+      this.validarDetallesMaterialOtro(dto.detalles);
+
       // Calcular subtotales y monto total.
       const detallesConSubtotal = dto.detalles.map((d) => ({
-        material_id: d.material_id,
+        material_id: d.material_id ?? null,
+        nombre_personalizado: d.nombre_personalizado?.trim() || null,
         cantidad: d.cantidad ?? 0,
         unidad_medida: d.unidad_medida,
         precio_unitario: d.precio_unitario ?? 0,
@@ -377,7 +383,10 @@ export class TransaccionesService {
 
       // Snapshots para el historial.
       const materialesSnapshot: MaterialSnapshot[] = dto.detalles.map((d) => ({
-        material_id: d.material_id,
+        material_id: d.material_id ?? null,
+        ...(d.nombre_personalizado?.trim()
+          ? { nombre_personalizado: d.nombre_personalizado.trim() }
+          : {}),
         cantidad: d.cantidad ?? 0,
         unidad_medida: d.unidad_medida,
         precio_unitario: d.precio_unitario,
@@ -388,6 +397,9 @@ export class TransaccionesService {
       const snapshotSinPrecio: MaterialSnapshot[] = materialesSnapshot.map(
         (m) => ({
           material_id: m.material_id,
+          ...(m.nombre_personalizado
+            ? { nombre_personalizado: m.nombre_personalizado }
+            : {}),
           cantidad: m.cantidad,
           unidad_medida: m.unidad_medida,
           precio_unitario: undefined,
@@ -643,6 +655,7 @@ export class TransaccionesService {
             );
           }
         }
+        this.validarDetallesMaterialOtro(dto.detalles);
 
         // Recolector efectivo después del update: si lo estamos
         // auto-asignando arriba o ya existía, validamos same-depto con
@@ -660,7 +673,8 @@ export class TransaccionesService {
         }
 
         const detallesConSubtotal = dto.detalles.map((d) => ({
-          material_id: d.material_id,
+          material_id: d.material_id ?? null,
+          nombre_personalizado: d.nombre_personalizado?.trim() || null,
           cantidad: d.cantidad ?? 0,
           unidad_medida: d.unidad_medida,
           precio_unitario: d.precio_unitario ?? 0,
@@ -698,7 +712,10 @@ export class TransaccionesService {
           detalles: dto.detalles?.length
             ? {
                 materiales: dto.detalles.map((d) => ({
-                  material_id: d.material_id,
+                  material_id: d.material_id ?? null,
+                  ...(d.nombre_personalizado?.trim()
+                    ? { nombre_personalizado: d.nombre_personalizado.trim() }
+                    : {}),
                   cantidad: d.cantidad ?? 0,
                   unidad_medida: d.unidad_medida,
                   precio_unitario: d.precio_unitario,
@@ -1154,6 +1171,7 @@ export class TransaccionesService {
             );
           }
         }
+        this.validarDetallesMaterialOtro(dto.detalles);
 
         // Validar sucursales same-depto con el recolector resultante.
         const recolectorIdEfectivo =
@@ -1168,7 +1186,8 @@ export class TransaccionesService {
 
         const detallesConSubtotal = dto.detalles.map((d) => ({
           transaccion_id: id,
-          material_id: d.material_id,
+          material_id: d.material_id ?? null,
+          nombre_personalizado: d.nombre_personalizado?.trim() || null,
           cantidad: d.cantidad ?? 0,
           unidad_medida: d.unidad_medida,
           precio_unitario: d.precio_unitario ?? 0,
@@ -1315,6 +1334,27 @@ export class TransaccionesService {
     }
   }
 
+  /**
+   * Valida que cada línea de detalle sea O un material del catálogo
+   * (`material_id`) O un "Otro" de texto libre (`nombre_personalizado`),
+   * nunca ambos ni ninguno. Coincide con el CHECK de BD
+   * `chk_detalle_material_xor_otro`.
+   */
+  private validarDetallesMaterialOtro(
+    detalles: DetalleTransaccionDto[],
+  ): void {
+    for (const d of detalles) {
+      const tieneCatalogo = d.material_id != null;
+      const tieneOtro =
+        d.nombre_personalizado != null && d.nombre_personalizado.trim() !== '';
+      if (tieneCatalogo === tieneOtro) {
+        throw new BadRequestException(
+          'Cada material debe ser del catálogo o un "Otro" con nombre, no ambos ni ninguno',
+        );
+      }
+    }
+  }
+
   private async verificarExternoActivo(
     tx: Prisma.TransactionClient,
     externoId: number,
@@ -1415,7 +1455,10 @@ export class TransaccionesService {
         observaciones: undefined,
         detalles: {
           materiales: detallesDeEsta.map((d) => ({
-            material_id: d.material_id,
+            material_id: d.material_id ?? null,
+            ...(d.nombre_personalizado?.trim()
+              ? { nombre_personalizado: d.nombre_personalizado.trim() }
+              : {}),
             cantidad: d.cantidad ?? 0,
             unidad_medida: d.unidad_medida,
             precio_unitario: undefined as number | undefined,

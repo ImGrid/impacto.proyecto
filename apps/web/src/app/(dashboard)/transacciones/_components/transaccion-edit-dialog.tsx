@@ -80,8 +80,13 @@ function deriveTipoDestino(t: TransaccionDetalle | undefined): TipoDestino {
   return "ninguno";
 }
 
+// Valor centinela del Select de material: registra un "Otro" de texto libre.
+const MATERIAL_OTRO = "__otro__";
+
 const detalleSchema = z.object({
   material_id: z.string().min(1, "Seleccione un material"),
+  // Solo se usa cuando material_id === MATERIAL_OTRO.
+  nombre_personalizado: z.string().max(100, "Máximo 100 caracteres").optional(),
   cantidad: z
     .string()
     .min(1, "Cantidad obligatoria")
@@ -112,6 +117,16 @@ const formSchema = z
         message: "La fecha no puede ser futura",
       });
     }
+    // Si la línea es "Otro", el nombre del material es obligatorio.
+    data.detalles.forEach((d, i) => {
+      if (d.material_id === MATERIAL_OTRO && !d.nombre_personalizado?.trim()) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["detalles", i, "nombre_personalizado"],
+          message: "Escriba qué material es",
+        });
+      }
+    });
     if (data.tipo_destino === "centro_op" && !data.centro_operacional_id) {
       ctx.addIssue({
         code: "custom",
@@ -262,7 +277,10 @@ function EditForm({
       detalles:
         transaccion.detalle_transaccion.length > 0
           ? transaccion.detalle_transaccion.map((d) => ({
-              material_id: String(d.material_id),
+              // Si la línea no tiene material de catálogo es un "Otro".
+              material_id:
+                d.material_id != null ? String(d.material_id) : MATERIAL_OTRO,
+              nombre_personalizado: d.nombre_personalizado ?? "",
               cantidad: String(d.cantidad),
               unidad_medida: d.unidad_medida as UnidadMedida,
               precio_unitario:
@@ -275,6 +293,7 @@ function EditForm({
           : [
               {
                 material_id: "",
+                nombre_personalizado: "",
                 cantidad: "",
                 unidad_medida: "KG" as UnidadMedida,
                 precio_unitario: "",
@@ -359,7 +378,10 @@ function EditForm({
 
       // Detalles. Cada uno puede traer su propia `sucursal_id` (opcional).
       payload.detalles = data.detalles.map((d) => ({
-        material_id: Number(d.material_id),
+        // Catálogo (material_id) o "Otro" (nombre_personalizado), nunca ambos.
+        ...(d.material_id === MATERIAL_OTRO
+          ? { nombre_personalizado: d.nombre_personalizado?.trim() }
+          : { material_id: Number(d.material_id) }),
         cantidad: Number(d.cantidad),
         unidad_medida: d.unidad_medida,
         precio_unitario: d.precio_unitario
@@ -598,6 +620,7 @@ function EditForm({
                   onClick={() =>
                     detallesFields.append({
                       material_id: "",
+                      nombre_personalizado: "",
                       cantidad: "",
                       unidad_medida: "KG" as UnidadMedida,
                       precio_unitario: "",
@@ -638,6 +661,9 @@ function EditForm({
                                 {m.nombre}
                               </SelectItem>
                             ))}
+                            <SelectItem value={MATERIAL_OTRO}>
+                              Otro (especificar)
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -724,6 +750,30 @@ function EditForm({
                     </Button>
                   </div>
                 </div>
+
+                {/* Nombre libre cuando la línea es "Otro". */}
+                {form.watch(`detalles.${index}.material_id`) ===
+                  MATERIAL_OTRO && (
+                  <FormField
+                    control={form.control}
+                    name={`detalles.${index}.nombre_personalizado`}
+                    render={({ field: inputField }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-muted-foreground">
+                          Nombre del material (Otro)
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="¿Qué material es? (ej: Pilas, Telgopor...)"
+                            disabled={editMutation.isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
 
                 {/* Origen (sucursal) por línea — opcional. */}
                 <FormField

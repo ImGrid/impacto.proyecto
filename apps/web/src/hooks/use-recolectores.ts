@@ -13,6 +13,7 @@ import type {
   Genero,
   DiaSemana,
   PaginatedResponse,
+  UnidadMedida,
 } from "@/types/api";
 
 export const recolectoresKeys = {
@@ -121,7 +122,10 @@ export function useRecolectorDetalle(id: number | null) {
 }
 
 type RecolectorMaterialInput = {
-  material_id: number;
+  // Catálogo (material_id) o "Otro" (nombre_personalizado + unidad_medida).
+  material_id?: number;
+  nombre_personalizado?: string;
+  unidad_medida?: UnidadMedida;
   cantidad_mensual?: number;
   precio_venta?: number;
   es_principal?: boolean;

@@ -191,8 +191,9 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
-        material_id?: number;
-        material: { factor_co2: Prisma.Decimal | null };
+        // null en las líneas "Otro" (texto libre, sin material de catálogo).
+        material_id?: number | null;
+        material: { factor_co2: Prisma.Decimal | null } | null;
       }>;
     }>,
     materialFiltro?: number,
@@ -212,7 +213,9 @@ export class DashboardService {
         if (materialFiltro && d.material_id !== materialFiltro) continue;
         const cantidad = Number(d.cantidad);
         kg += cantidad;
-        const factor = d.material.factor_co2
+        // Las líneas "Otro" no tienen factor_co2: aportan 0 al CO₂ pero sí
+        // suman a los kg.
+        const factor = d.material?.factor_co2
           ? Number(d.material.factor_co2)
           : 0;
         co2 += cantidad * factor;
@@ -276,7 +279,7 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
-        material: { id: number; nombre: string };
+        material: { id: number; nombre: string } | null;
       }>;
     }>,
   ) {
@@ -287,15 +290,15 @@ export class DashboardService {
         if (d.unidad_medida !== 'KG') continue;
         const cantidad = Number(d.cantidad);
         total += cantidad;
-        const prev = map.get(d.material.id);
+        // Las líneas "Otro" (sin material de catálogo) se agrupan en un
+        // bucket sintético con id 0 = "Otros (sin clasificar)".
+        const matId = d.material?.id ?? 0;
+        const matNombre = d.material?.nombre ?? 'Otros (sin clasificar)';
+        const prev = map.get(matId);
         if (prev) {
           prev.kg += cantidad;
         } else {
-          map.set(d.material.id, {
-            id: d.material.id,
-            nombre: d.material.nombre,
-            kg: cantidad,
-          });
+          map.set(matId, { id: matId, nombre: matNombre, kg: cantidad });
         }
       }
     }
@@ -635,8 +638,8 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
-        material_id: number;
-        material: { factor_co2: Prisma.Decimal | null };
+        material_id: number | null;
+        material: { factor_co2: Prisma.Decimal | null } | null;
       }>;
     }>,
     materialFiltro?: number,
@@ -669,7 +672,7 @@ export class DashboardService {
         if (materialFiltro && d.material_id !== materialFiltro) continue;
         const q = Number(d.cantidad);
         acc.kg += q;
-        if (d.material.factor_co2) {
+        if (d.material?.factor_co2) {
           acc.co2_kg += q * Number(d.material.factor_co2);
         }
       }
@@ -698,7 +701,7 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
-        material_id: number;
+        material_id: number | null;
         subtotal: Prisma.Decimal;
         sucursal: {
           id: number;
@@ -753,7 +756,7 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
-        material_id: number;
+        material_id: number | null;
         sucursal: {
           generador: {
             tipo_generador: { id: number; nombre: string };
@@ -797,7 +800,7 @@ export class DashboardService {
           id: number;
           nombre: string;
           factor_co2: Prisma.Decimal | null;
-        };
+        } | null;
       }>;
     }>,
     materialFiltro?: number,
@@ -816,18 +819,24 @@ export class DashboardService {
     for (const t of transacciones) {
       for (const d of t.detalle_transaccion) {
         if (d.unidad_medida !== 'KG') continue;
-        if (materialFiltro && d.material.id !== materialFiltro) continue;
+        // Las líneas "Otro" (sin material de catálogo) se agrupan bajo el
+        // bucket sintético id 0 = "Otros (sin clasificar)". Si hay filtro por
+        // material concreto, las "Otro" quedan fuera (id 0 ≠ filtro).
+        const matId = d.material?.id ?? 0;
+        if (materialFiltro && matId !== materialFiltro) continue;
         const q = Number(d.cantidad);
         total += q;
-        const prev = map.get(d.material.id);
-        const factor = d.material.factor_co2 ? Number(d.material.factor_co2) : null;
+        const prev = map.get(matId);
+        const factor = d.material?.factor_co2
+          ? Number(d.material.factor_co2)
+          : null;
         if (prev) {
           prev.kg += q;
           if (factor != null) prev.co2_evitado_kg += q * factor;
         } else {
-          map.set(d.material.id, {
-            id: d.material.id,
-            nombre: d.material.nombre,
+          map.set(matId, {
+            id: matId,
+            nombre: d.material?.nombre ?? 'Otros (sin clasificar)',
             factor_co2: factor,
             kg: q,
             co2_evitado_kg: factor != null ? q * factor : 0,
@@ -856,7 +865,7 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
-        material_id: number;
+        material_id: number | null;
       }>;
     }>,
     desde: Date,
@@ -908,7 +917,7 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
-        material_id: number;
+        material_id: number | null;
       }>;
     }>,
     desde: Date,

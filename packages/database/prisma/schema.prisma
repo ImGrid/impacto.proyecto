@@ -49,17 +49,18 @@ model codigo_qr {
 }
 
 model detalle_transaccion {
-  id              Int           @id @default(autoincrement())
-  transaccion_id  Int
-  material_id     Int
-  cantidad        Decimal       @db.Decimal(10, 2)
-  unidad_medida   unidad_medida
-  precio_unitario Decimal       @db.Decimal(10, 2)
-  subtotal        Decimal       @db.Decimal(10, 2)
-  sucursal_id     Int?
-  material        material      @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  sucursal        sucursal?     @relation(fields: [sucursal_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  transaccion     transaccion   @relation(fields: [transaccion_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                   Int           @id @default(autoincrement())
+  transaccion_id       Int
+  material_id          Int?
+  cantidad             Decimal       @db.Decimal(10, 2)
+  unidad_medida        unidad_medida
+  precio_unitario      Decimal       @db.Decimal(10, 2)
+  subtotal             Decimal       @db.Decimal(10, 2)
+  sucursal_id          Int?
+  nombre_personalizado String?       @db.VarChar(100)
+  material             material?     @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sucursal             sucursal?     @relation(fields: [sucursal_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  transaccion          transaccion   @relation(fields: [transaccion_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([material_id], map: "idx_detalle_material")
   @@index([transaccion_id], map: "idx_detalle_transaccion")
@@ -133,10 +134,15 @@ model material {
   factor_co2            Decimal?              @db.Decimal(10, 4)
   activo                Boolean               @default(true)
   fecha_creacion        DateTime              @default(now()) @db.Timestamp(6)
+  departamento_id       Int
   detalle_transaccion   detalle_transaccion[]
+  departamento          departamento          @relation(fields: [departamento_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   precio_material       precio_material[]
   recolector_material   recolector_material[]
   sucursal_material     sucursal_material[]
+
+  @@unique([departamento_id, nombre], map: "uq_material_departamento_nombre")
+  @@index([departamento_id], map: "idx_material_departamento")
 }
 
 model notificacion {
@@ -239,14 +245,16 @@ model recolector_dia_trabajo {
 }
 
 model recolector_material {
-  id               Int        @id @default(autoincrement())
-  recolector_id    Int
-  material_id      Int
-  cantidad_mensual Decimal?   @db.Decimal(10, 2)
-  precio_venta     Decimal?   @db.Decimal(10, 2)
-  es_principal     Boolean    @default(false)
-  material         material   @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  recolector       recolector @relation(fields: [recolector_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                   Int            @id @default(autoincrement())
+  recolector_id        Int
+  material_id          Int?
+  cantidad_mensual     Decimal?       @db.Decimal(10, 2)
+  precio_venta         Decimal?       @db.Decimal(10, 2)
+  es_principal         Boolean        @default(false)
+  nombre_personalizado String?        @db.VarChar(100)
+  unidad_medida        unidad_medida?
+  material             material?      @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  recolector           recolector     @relation(fields: [recolector_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([recolector_id, material_id])
   @@index([material_id], map: "idx_recolector_material_material")
@@ -291,12 +299,14 @@ model sucursal {
 }
 
 model sucursal_material {
-  id                  Int      @id @default(autoincrement())
-  sucursal_id         Int
-  material_id         Int
-  cantidad_aproximada String?  @db.VarChar(100)
-  material            material @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  sucursal            sucursal @relation(fields: [sucursal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                   Int            @id @default(autoincrement())
+  sucursal_id          Int
+  material_id          Int?
+  cantidad_aproximada  String?        @db.VarChar(100)
+  nombre_personalizado String?        @db.VarChar(100)
+  unidad_medida        unidad_medida?
+  material             material?      @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  sucursal             sucursal       @relation(fields: [sucursal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([sucursal_id, material_id])
   @@index([sucursal_id], map: "idx_sucursal_material_sucursal")
@@ -512,6 +522,7 @@ model departamento {
   administrador      administrador[]
   centro_operacional centro_operacional[]
   ciudad             ciudad[]
+  material           material[]
   recolector         recolector[]
   sucursal           sucursal[]
 }

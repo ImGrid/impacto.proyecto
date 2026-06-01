@@ -15,12 +15,28 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { dia_semana, genero } from '@prisma/client';
+import { dia_semana, genero, unidad_medida } from '@prisma/client';
 
 export class RecolectorMaterialDto {
+  // Material del catálogo (opcional) o "Otro" de texto libre
+  // (nombre_personalizado). El service valida XOR, igual que el CHECK de BD
+  // chk_recmat_material_xor_otro.
+  @IsOptional()
   @IsInt()
   @Type(() => Number)
-  material_id: number;
+  material_id?: number;
+
+  // Nombre del material cuando es un "Otro" (no está en el catálogo).
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  nombre_personalizado?: string;
+
+  // Unidad del material. Para los materiales del catálogo el frontend usa
+  // la unidad por defecto; para un "Otro" el usuario la elige.
+  @IsOptional()
+  @IsEnum(unidad_medida)
+  unidad_medida?: unidad_medida;
 
   @IsOptional()
   @IsNumber()

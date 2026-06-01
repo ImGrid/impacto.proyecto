@@ -28,7 +28,10 @@ function formatDate(dateStr: string): string {
 function formatMateriales(detalles: Transaccion["detalle_transaccion"]): string {
   if (!detalles || detalles.length === 0) return "—";
   return detalles
-    .map((d) => `${d.material.nombre} ${d.cantidad}${d.unidad_medida.toLowerCase()}`)
+    .map(
+      (d) =>
+        `${d.material?.nombre ?? d.nombre_personalizado ?? "Otro"} ${d.cantidad}${d.unidad_medida.toLowerCase()}`,
+    )
     .join(", ");
 }
 

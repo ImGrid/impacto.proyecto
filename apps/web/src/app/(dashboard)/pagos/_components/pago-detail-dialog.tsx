@@ -111,7 +111,7 @@ export function PagoDetailDialog({
                             {pt.transaccion.detalle_transaccion
                               .map(
                                 (d) =>
-                                  `${d.material.nombre} ${d.cantidad}${d.unidad_medida.toLowerCase()}`,
+                                  `${d.material?.nombre ?? d.nombre_personalizado ?? "Otro"} ${d.cantidad}${d.unidad_medida.toLowerCase()}`,
                               )
                               .join(", ")}
                           </p>

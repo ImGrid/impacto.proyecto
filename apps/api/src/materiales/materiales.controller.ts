@@ -12,7 +12,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
-import { Roles } from '../auth/decorators';
+import { CurrentUser, Roles } from '../auth/decorators';
 import { MaterialesService } from './materiales.service';
 import { CreateMaterialDto, UpdateMaterialDto, MaterialQueryDto } from './dto';
 
@@ -22,33 +22,46 @@ export class MaterialesController {
   constructor(private readonly materialesService: MaterialesService) {}
 
   @Post()
-  create(@Body() dto: CreateMaterialDto) {
-    return this.materialesService.create(dto);
+  create(
+    @Body() dto: CreateMaterialDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.materialesService.create(dto, departamentoActivo);
   }
 
   @Get()
   @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
-  findAll(@Query() query: MaterialQueryDto) {
-    return this.materialesService.findAll(query);
+  findAll(
+    @Query() query: MaterialQueryDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.materialesService.findAll(query, departamentoActivo);
   }
 
   @Get(':id')
   @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.materialesService.findOne(id);
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.materialesService.findOne(id, departamentoActivo);
   }
 
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateMaterialDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.materialesService.update(id, dto);
+    return this.materialesService.update(id, dto, departamentoActivo);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.materialesService.hardDelete(id);
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.materialesService.hardDelete(id, departamentoActivo);
   }
 }

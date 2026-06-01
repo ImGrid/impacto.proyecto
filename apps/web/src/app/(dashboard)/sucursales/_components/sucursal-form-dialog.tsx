@@ -14,6 +14,7 @@ import type {
   Generador,
   Material,
   Sucursal,
+  UnidadMedida,
   Zona,
 } from "@/types/api";
 import {
@@ -42,14 +43,28 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { normalizarParaComparar } from "@/lib/utils";
 
 const MapPicker = dynamic(() => import("@/components/shared/map-picker"), {
   ssr: false,
   loading: () => <Skeleton className="h-[300px] w-full rounded-md" />,
 });
 
+// Valor centinela del Select de material: registra un "Otro" de texto libre.
+const MATERIAL_OTRO = "__otro__";
+
+const unidadOptions: { value: UnidadMedida; label: string }[] = [
+  { value: "KG", label: "KG" },
+  { value: "UNIDAD", label: "Unidad" },
+  { value: "BOLSA", label: "Bolsa" },
+  { value: "TONELADA", label: "Tonelada" },
+];
+
 const materialRowSchema = z.object({
   material_id: z.string().min(1, "Seleccione un material"),
+  // Solo se usan cuando material_id === MATERIAL_OTRO.
+  nombre_personalizado: z.string().max(100, "Máximo 100 caracteres").optional(),
+  unidad_medida: z.enum(["KG", "UNIDAD", "BOLSA", "TONELADA"]).optional(),
   cantidad_aproximada: z.string().optional(),
 });
 
@@ -74,7 +89,34 @@ const formSchema = z.object({
   zona_id: z.string().min(1, "Seleccione una zona"),
   materiales: z.array(materialRowSchema).optional(),
   horarios: z.array(horarioRowSchema).optional(),
-});
+})
+  .superRefine((data, ctx) => {
+    // "Otro": nombre obligatorio y sin duplicados (normalizado: ignora
+    // mayúsculas, acentos y espacios).
+    const otrosVistos = new Map<string, number>();
+    data.materiales?.forEach((m, i) => {
+      if (m.material_id !== MATERIAL_OTRO) return;
+      const nombre = m.nombre_personalizado?.trim();
+      if (!nombre) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["materiales", i, "nombre_personalizado"],
+          message: "Escriba qué material es",
+        });
+        return;
+      }
+      const clave = normalizarParaComparar(nombre);
+      if (otrosVistos.has(clave)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["materiales", i, "nombre_personalizado"],
+          message: 'Ya agregó un material "Otro" con ese nombre',
+        });
+      } else {
+        otrosVistos.set(clave, i);
+      }
+    });
+  });
 
 type FormValues = z.infer<typeof formSchema>;
 
@@ -186,7 +228,11 @@ function SucursalForm({
       zona_id: sucursal ? String(sucursal.zona_id) : "",
       materiales:
         sucursal?.sucursal_material.map((sm) => ({
-          material_id: String(sm.material_id),
+          // Si la línea no tiene material de catálogo es un "Otro".
+          material_id:
+            sm.material_id != null ? String(sm.material_id) : MATERIAL_OTRO,
+          nombre_personalizado: sm.nombre_personalizado ?? "",
+          unidad_medida: (sm.unidad_medida ?? "KG") as UnidadMedida,
           cantidad_aproximada: sm.cantidad_aproximada ?? "",
         })) ?? [],
       horarios:
@@ -228,7 +274,13 @@ function SucursalForm({
   function onSubmit(data: FormValues) {
     const materiales = data.materiales?.length
       ? data.materiales.map((m) => ({
-          material_id: Number(m.material_id),
+          // Catálogo (material_id) o "Otro" (nombre_personalizado + unidad).
+          ...(m.material_id === MATERIAL_OTRO
+            ? {
+                nombre_personalizado: m.nombre_personalizado?.trim(),
+                unidad_medida: m.unidad_medida,
+              }
+            : { material_id: Number(m.material_id) }),
           ...(m.cantidad_aproximada
             ? { cantidad_aproximada: m.cantidad_aproximada }
             : {}),
@@ -514,6 +566,8 @@ function SucursalForm({
               onClick={() =>
                 materialesFields.append({
                   material_id: "",
+                  nombre_personalizado: "",
+                  unidad_medida: "KG",
                   cantidad_aproximada: "",
                 })
               }
@@ -530,65 +584,126 @@ function SucursalForm({
             </p>
           )}
 
-          {materialesFields.fields.map((field, index) => (
-            <div key={field.id} className="flex items-start gap-2">
-              <FormField
-                control={form.control}
-                name={`materiales.${index}.material_id`}
-                render={({ field: selectField }) => (
-                  <FormItem className="flex-1">
-                    <Select
-                      onValueChange={selectField.onChange}
-                      value={selectField.value}
-                      disabled={isPending}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Material" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {materialesCatalogo.map((mat) => (
-                          <SelectItem key={mat.id} value={String(mat.id)}>
-                            {mat.nombre}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name={`materiales.${index}.cantidad_aproximada`}
-                render={({ field: inputField }) => (
-                  <FormItem className="w-32">
-                    <FormControl>
-                      <Input
-                        placeholder="Cantidad"
-                        disabled={isPending}
-                        {...inputField}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => materialesFields.remove(index)}
-                disabled={isPending}
-                className="mt-0.5"
+          {materialesFields.fields.map((field, index) => {
+            const esOtro =
+              form.watch(`materiales.${index}.material_id`) === MATERIAL_OTRO;
+            return (
+              <div
+                key={field.id}
+                className="space-y-2 rounded-md border p-2"
               >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
+                <div className="flex items-start gap-2">
+                  <FormField
+                    control={form.control}
+                    name={`materiales.${index}.material_id`}
+                    render={({ field: selectField }) => (
+                      <FormItem className="flex-1">
+                        <Select
+                          onValueChange={selectField.onChange}
+                          value={selectField.value}
+                          disabled={isPending}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Material" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {materialesCatalogo.map((mat) => (
+                              <SelectItem key={mat.id} value={String(mat.id)}>
+                                {mat.nombre}
+                              </SelectItem>
+                            ))}
+                            <SelectItem value={MATERIAL_OTRO}>
+                              Otro (especificar)
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name={`materiales.${index}.cantidad_aproximada`}
+                    render={({ field: inputField }) => (
+                      <FormItem className="w-32">
+                        <FormControl>
+                          <Input
+                            placeholder="Cantidad"
+                            disabled={isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => materialesFields.remove(index)}
+                    disabled={isPending}
+                    className="mt-0.5"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {/* Nombre + unidad cuando la línea es "Otro". */}
+                {esOtro && (
+                  <div className="flex items-start gap-2">
+                    <FormField
+                      control={form.control}
+                      name={`materiales.${index}.nombre_personalizado`}
+                      render={({ field: inputField }) => (
+                        <FormItem className="flex-1">
+                          <FormControl>
+                            <Input
+                              placeholder="¿Qué material es? (ej: Pilas...)"
+                              disabled={isPending}
+                              {...inputField}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name={`materiales.${index}.unidad_medida`}
+                      render={({ field: selectField }) => (
+                        <FormItem className="w-32">
+                          <Select
+                            onValueChange={selectField.onChange}
+                            value={selectField.value}
+                            disabled={isPending}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {unidadOptions.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <DialogFooter>
