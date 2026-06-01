@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import {
   MapContainer,
@@ -11,8 +11,17 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import { GeoSearchControl, GeoapifyProvider } from "leaflet-geosearch";
+import { Maximize2 } from "lucide-react";
 import { useDepartamentoActivo } from "@/components/departamento-context";
 import { centroDepartamento } from "@/config/departamento-centros";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // API key de Geoapify (geocoding). Se inyecta en build (NEXT_PUBLIC_*).
 // Si no está definida, el buscador de direcciones simplemente no se muestra
@@ -150,16 +159,19 @@ function AddressSearch({
   return null;
 }
 
-export default function MapPicker({
+/**
+ * Contenido interno del mapa (tiles, handlers de click/arrastre, buscador y
+ * marcador/círculo). Se reutiliza en el mapa inline (300px) y en el mapa a
+ * pantalla completa. Son DOS instancias de MapContainer distintas (en Leaflet
+ * un mapa no se puede "mover" de contenedor), pero ambas comparten
+ * `position`/`onPositionChange` —controlados por el formulario—, así que la
+ * ubicación queda sincronizada entre las dos.
+ */
+function MapContents({
   position,
   radiusKm,
   onPositionChange,
 }: MapPickerProps) {
-  // Centro inicial cuando aún no hay posición = capital del departamento
-  // activo (antes era siempre Cochabamba).
-  const departamentoActivo = useDepartamentoActivo();
-  const centroInicial = centroDepartamento(departamentoActivo);
-
   const handleDragEnd = useCallback(
     (e: L.DragEndEvent) => {
       const marker = e.target as L.Marker;
@@ -170,12 +182,7 @@ export default function MapPicker({
   );
 
   return (
-    <MapContainer
-      center={position ? [position.lat, position.lng] : centroInicial}
-      zoom={position ? 14 : DEFAULT_ZOOM}
-      className="h-[300px] w-full rounded-md border"
-      style={{ zIndex: 0 }}
-    >
+    <>
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -207,6 +214,91 @@ export default function MapPicker({
           )}
         </>
       )}
-    </MapContainer>
+    </>
+  );
+}
+
+export default function MapPicker({
+  position,
+  radiusKm,
+  onPositionChange,
+}: MapPickerProps) {
+  // Centro inicial cuando aún no hay posición = capital del departamento
+  // activo (antes era siempre Cochabamba).
+  const departamentoActivo = useDepartamentoActivo();
+  const centroInicial = centroDepartamento(departamentoActivo);
+  const [expanded, setExpanded] = useState(false);
+
+  const center: [number, number] = position
+    ? [position.lat, position.lng]
+    : centroInicial;
+  const zoom = position ? 14 : DEFAULT_ZOOM;
+
+  return (
+    <>
+      {/* Mapa inline (300px) con botón para expandir a pantalla completa. */}
+      <div className="relative">
+        <MapContainer
+          center={center}
+          zoom={zoom}
+          className="h-[300px] w-full rounded-md border"
+          style={{ zIndex: 0 }}
+        >
+          <MapContents
+            position={position}
+            radiusKm={radiusKm}
+            onPositionChange={onPositionChange}
+          />
+        </MapContainer>
+
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => setExpanded(true)}
+          // El buscador "bar" de leaflet-geosearch va centrado arriba y el
+          // zoom arriba-izquierda; la esquina superior derecha queda libre.
+          className="absolute right-2 top-2 z-[1000] gap-1.5 shadow-md"
+          title="Ver el mapa en pantalla completa"
+        >
+          <Maximize2 className="h-4 w-4" />
+          Pantalla completa
+        </Button>
+      </div>
+
+      {/* Vista a pantalla completa: Dialog anidado de Radix (maneja focus,
+          Escape, z-index y portal correctamente). El contenido se estira a
+          todo el viewport sobrescribiendo el ancho/alto del DialogContent; el
+          centrado por `transform` del dialog NO atrapa nada porque el mapa es
+          contenido normal (no `position: fixed`). */}
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent className="flex h-screen w-full max-w-none flex-col gap-0 rounded-none border-0 p-0 sm:max-w-none">
+          <DialogHeader className="border-b px-4 py-3 text-left">
+            <DialogTitle className="text-base">
+              Seleccione la ubicación
+            </DialogTitle>
+            <DialogDescription>
+              Busque una dirección, haga clic en el mapa o arrastre el marcador
+              para fijar el punto.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="relative flex-1">
+            <MapContainer
+              center={center}
+              zoom={zoom}
+              className="h-full w-full"
+              style={{ zIndex: 0 }}
+            >
+              <MapContents
+                position={position}
+                radiusKm={radiusKm}
+                onPositionChange={onPositionChange}
+              />
+            </MapContainer>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
