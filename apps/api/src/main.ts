@@ -9,6 +9,13 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Límite del body JSON: el form del recolector envía la foto de perfil en
+  // base64 dentro del JSON. Incluso una imagen pequeña supera el default de
+  // Nest (100 kB). Se sube a 15 MB (igual que client_max_body_size de nginx)
+  // para cubrir hasta ~8 MB de imagen (base64 pesa ~33% más).
+  app.useBodyParser('json', { limit: '15mb' });
+  app.useBodyParser('urlencoded', { extended: true, limit: '15mb' });
+
   const configService = app.get(ConfigService);
 
   // Prefijo global para todas las rutas: /api/...
