@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Plus, Search, X } from "lucide-react";
 import { useCiudades } from "@/hooks/use-ciudades";
-import { useDepartamentos } from "@/hooks/use-departamentos";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import { ESTADO_OPTIONS } from "@/lib/constants";
 import { columns } from "./columns";
 import { DataTable } from "@/components/shared/data-table";
@@ -24,24 +24,21 @@ export function CiudadesContent() {
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [activo, setActivo] = useState<boolean | undefined>(undefined);
-  const [departamentoId, setDepartamentoId] = useState<number | undefined>(
-    undefined,
-  );
+
+  // El catálogo de geografía se acota al departamento activo de la sesión:
+  // estando en Oruro solo se ven las ciudades de Oruro. Para gestionar otro
+  // departamento se cambia con el switcher de la topbar.
+  const departamentoActivo = useDepartamentoActivo();
 
   const { data, isLoading } = useCiudades({
     page,
     limit: pageSize,
     search,
     activo,
-    departamento_id: departamentoId,
+    departamento_id: departamentoActivo ?? undefined,
   });
 
-  const { data: departamentosOpts } = useDepartamentos({
-    limit: 100,
-    activo: true,
-  });
-
-  const hasFilters = activo !== undefined || departamentoId !== undefined;
+  const hasFilters = activo !== undefined;
 
   function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
     setSearch(e.target.value);
@@ -50,7 +47,6 @@ export function CiudadesContent() {
 
   function clearFilters() {
     setActivo(undefined);
-    setDepartamentoId(undefined);
     setPage(1);
   }
 
@@ -73,28 +69,6 @@ export function CiudadesContent() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Select
-          value={
-            departamentoId === undefined ? "all" : String(departamentoId)
-          }
-          onValueChange={(value) => {
-            setDepartamentoId(value === "all" ? undefined : Number(value));
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-[240px]">
-            <SelectValue placeholder="Departamento" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos los departamentos</SelectItem>
-            {departamentosOpts?.data.map((d) => (
-              <SelectItem key={d.id} value={String(d.id)}>
-                {d.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
         <Select
           value={activo === undefined ? "all" : String(activo)}
           onValueChange={(value) => {

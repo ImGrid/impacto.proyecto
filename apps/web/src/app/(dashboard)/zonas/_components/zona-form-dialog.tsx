@@ -7,6 +7,7 @@ import { z } from "zod/v4";
 import { Loader2, MapPin } from "lucide-react";
 import { useCreateZona, useUpdateZona } from "@/hooks/use-zonas";
 import { useCiudades } from "@/hooks/use-ciudades";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import type { Ciudad, Zona } from "@/types/api";
 import {
   Dialog,
@@ -75,7 +76,13 @@ export function ZonaFormDialog({
   onOpenChange,
   zona,
 }: ZonaFormDialogProps) {
-  const { data: ciudadesData } = useCiudades({ limit: 100, activo: true });
+  // El select de ciudad se acota a las ciudades del departamento activo.
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: ciudadesData } = useCiudades({
+    limit: 100,
+    activo: true,
+    departamento_id: departamentoActivo ?? undefined,
+  });
   const isEditing = !!zona;
 
   return (

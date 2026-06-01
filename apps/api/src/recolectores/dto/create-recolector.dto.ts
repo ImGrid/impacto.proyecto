@@ -40,11 +40,13 @@ export class RecolectorMaterialDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(0, { message: 'La cantidad mensual no puede ser negativa' })
   @Type(() => Number)
   cantidad_mensual?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(0, { message: 'El precio no puede ser negativo' })
   @Type(() => Number)
   precio_venta?: number;
 

@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { Plus, Search, TableProperties, Map } from "lucide-react";
 import { useZonas, useZonasMapa } from "@/hooks/use-zonas";
 import { useCiudades } from "@/hooks/use-ciudades";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import { ESTADO_OPTIONS } from "@/lib/constants";
 import { columns } from "./columns";
 import { DataTable } from "@/components/shared/data-table";
@@ -37,16 +38,24 @@ export function ZonasContent() {
   const [activo, setActivo] = useState<boolean | undefined>(undefined);
   const [ciudadId, setCiudadId] = useState<number | undefined>(undefined);
 
+  // La geografía se acota al departamento activo de la sesión.
+  const departamentoActivo = useDepartamentoActivo();
+
   const { data, isLoading } = useZonas({
     page,
     limit: pageSize,
     search,
     activo,
     ciudadId,
+    departamentoId: departamentoActivo ?? undefined,
   });
 
   const { data: zonasMapaData } = useZonasMapa();
-  const { data: ciudadesData } = useCiudades({ limit: 100, activo: true });
+  const { data: ciudadesData } = useCiudades({
+    limit: 100,
+    activo: true,
+    departamento_id: departamentoActivo ?? undefined,
+  });
 
   function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
     setSearch(e.target.value);
@@ -135,7 +144,14 @@ export function ZonasContent() {
         </TabsContent>
 
         <TabsContent value="mapa">
-          <ZonasMapView zonas={zonasMapaData ?? []} />
+          {/* /zonas/mapa no filtra por depto en el backend; se acota aquí. */}
+          <ZonasMapView
+            zonas={(zonasMapaData ?? []).filter(
+              (z) =>
+                departamentoActivo == null ||
+                z.ciudad.departamento.id === departamentoActivo,
+            )}
+          />
         </TabsContent>
       </Tabs>
 

@@ -6,6 +6,7 @@ import { z } from "zod/v4";
 import { Loader2 } from "lucide-react";
 import { useCreateCiudad, useUpdateCiudad } from "@/hooks/use-ciudades";
 import { useDepartamentos } from "@/hooks/use-departamentos";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import type { Ciudad, Departamento } from "@/types/api";
 import {
   Dialog,
@@ -64,6 +65,7 @@ export function CiudadFormDialog({
     limit: 100,
     activo: true,
   });
+  const departamentoActivo = useDepartamentoActivo();
 
   const isEditing = !!ciudad;
 
@@ -91,6 +93,7 @@ export function CiudadFormDialog({
             key={ciudad?.id ?? "new"}
             ciudad={ciudad}
             departamentos={departamentosData.data}
+            departamentoActivo={departamentoActivo}
             onClose={() => onOpenChange(false)}
           />
         )}
@@ -102,10 +105,16 @@ export function CiudadFormDialog({
 interface CiudadFormProps {
   ciudad?: Ciudad;
   departamentos: Departamento[];
+  departamentoActivo: number | null;
   onClose: () => void;
 }
 
-function CiudadForm({ ciudad, departamentos, onClose }: CiudadFormProps) {
+function CiudadForm({
+  ciudad,
+  departamentos,
+  departamentoActivo,
+  onClose,
+}: CiudadFormProps) {
   const isEditing = !!ciudad;
   const createMutation = useCreateCiudad();
   const updateMutation = useUpdateCiudad();
@@ -114,7 +123,13 @@ function CiudadForm({ ciudad, departamentos, onClose }: CiudadFormProps) {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      departamento_id: ciudad ? String(ciudad.departamento_id) : "",
+      // El departamento no se elige: al crear se usa el departamento activo
+      // de la sesión; al editar se conserva el de la ciudad.
+      departamento_id: ciudad
+        ? String(ciudad.departamento_id)
+        : departamentoActivo != null
+          ? String(departamentoActivo)
+          : "",
       nombre: ciudad?.nombre ?? "",
     },
   });
@@ -146,11 +161,7 @@ function CiudadForm({ ciudad, departamentos, onClose }: CiudadFormProps) {
           render={({ field }) => (
             <FormItem>
               <FormLabel>Departamento</FormLabel>
-              <Select
-                onValueChange={field.onChange}
-                value={field.value}
-                disabled={isPending}
-              >
+              <Select onValueChange={field.onChange} value={field.value} disabled>
                 <FormControl>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Seleccionar departamento" />
@@ -164,6 +175,10 @@ function CiudadForm({ ciudad, departamentos, onClose }: CiudadFormProps) {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-muted-foreground text-xs">
+                Se usa el departamento activo. Para otro departamento, cámbielo
+                en la barra superior.
+              </p>
               <FormMessage />
             </FormItem>
           )}

@@ -10,6 +10,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { estado_transaccion, unidad_medida } from '@prisma/client';
@@ -37,6 +38,7 @@ export class DetalleTransaccionDto {
   // adicional en el service que exige cantidad > 0.
   @IsOptional()
   @IsNumber()
+  @Min(0, { message: 'La cantidad no puede ser negativa' })
   @Type(() => Number)
   cantidad?: number;
 
@@ -45,6 +47,7 @@ export class DetalleTransaccionDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(0, { message: 'El precio no puede ser negativo' })
   @Type(() => Number)
   precio_unitario?: number;
 

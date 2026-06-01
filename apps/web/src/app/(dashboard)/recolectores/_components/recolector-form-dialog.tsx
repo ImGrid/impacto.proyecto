@@ -90,8 +90,14 @@ const materialRowSchema = z.object({
   // Solo se usan cuando material_id === MATERIAL_OTRO.
   nombre_personalizado: z.string().max(100, "Máximo 100 caracteres").optional(),
   unidad_medida: z.enum(["KG", "UNIDAD", "BOLSA", "TONELADA"]).optional(),
-  cantidad_mensual: z.string().optional(),
-  precio_venta: z.string().optional(),
+  cantidad_mensual: z
+    .string()
+    .optional()
+    .refine((v) => !v || Number(v) >= 0, "No puede ser negativo"),
+  precio_venta: z
+    .string()
+    .optional()
+    .refine((v) => !v || Number(v) >= 0, "No puede ser negativo"),
   es_principal: z.boolean().optional(),
 });
 
@@ -880,6 +886,7 @@ function RecolectorForm({
                             <Input
                               type="number"
                               step="any"
+                              min="0"
                               placeholder="0"
                               disabled={isPending}
                               {...inputField}
@@ -904,6 +911,7 @@ function RecolectorForm({
                           <Input
                             type="number"
                             step="any"
+                            min="0"
                             placeholder="Bs."
                             disabled={isPending}
                             {...inputField}
