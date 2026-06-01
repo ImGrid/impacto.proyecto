@@ -80,6 +80,14 @@ const unidadLabels: Record<UnidadMedida, string> = {
   TONELADA: "Tonelada",
 };
 
+// Bloquea la escritura del signo negativo y la notación exponencial en los
+// inputs numéricos de precio/cantidad (el atributo `min` no impide teclear el
+// "-", solo afecta a las flechas y a la validación). La validación de >= 0
+// queda como respaldo (p.ej. ante un pegado).
+function bloquearNegativo(e: { key: string; preventDefault: () => void }) {
+  if (e.key === "-" || e.key === "e" || e.key === "E") e.preventDefault();
+}
+
 // --- Zod Schema ---
 
 // Valor centinela del Select de material: registra un "Otro" de texto libre.
@@ -889,6 +897,7 @@ function RecolectorForm({
                               min="0"
                               placeholder="0"
                               disabled={isPending}
+                              onKeyDown={bloquearNegativo}
                               {...inputField}
                             />
                           </FormControl>
@@ -914,6 +923,7 @@ function RecolectorForm({
                             min="0"
                             placeholder="Bs."
                             disabled={isPending}
+                            onKeyDown={bloquearNegativo}
                             {...inputField}
                           />
                         </FormControl>
