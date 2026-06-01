@@ -7,6 +7,7 @@ import { PrismaModule } from "./prisma";
 import { AuthModule, JwtAuthGuard, RolesGuard } from "./auth";
 import { AllExceptionsFilter } from "./common/filters";
 import { FcmModule } from "./common/services/fcm.module";
+import { ImageStorageModule } from "./common/services/image-storage.module";
 import { DepartamentosModule } from "./departamentos";
 import { CiudadesModule } from "./ciudades";
 import { ExternosModule } from "./externos";
@@ -43,6 +44,10 @@ import { DashboardModule } from "./dashboard";
           .valid("development", "production")
           .default("development"),
         CORS_ORIGIN: Joi.string().default("http://localhost:3000"),
+        // Carpeta en disco donde se guardan las imágenes subidas (foto de
+        // perfil del recolector). En producción debe apuntar FUERA del repo
+        // (ej. /var/www/triple-impacto-uploads) y nginx la sirve en /uploads.
+        UPLOAD_DIR: Joi.string().default("./uploads"),
       }),
     }),
 
@@ -51,6 +56,9 @@ import { DashboardModule } from "./dashboard";
 
     // Firebase Cloud Messaging - global
     FcmModule,
+
+    // Almacenamiento de imágenes (foto de perfil del recolector) - global
+    ImageStorageModule,
 
     // Autenticación (JWT + Passport)
     AuthModule,

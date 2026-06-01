@@ -216,6 +216,7 @@ model recolector {
   activo                    Boolean                     @default(true)
   fecha_creacion            DateTime                    @default(now()) @db.Timestamp(6)
   departamento_id           Int
+  foto_url                  String?                     @db.VarChar(255)
   pago                      pago[]
   asociacion                asociacion?                 @relation(fields: [asociacion_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   departamento              departamento                @relation(fields: [departamento_id], references: [id], onDelete: NoAction, onUpdate: NoAction)

@@ -19,3 +19,16 @@ export function normalizarParaComparar(texto: string): string {
     .replace(/\p{Diacritic}/gu, "")
     .replace(/\s+/g, " ")
 }
+
+/**
+ * Construye la URL absoluta de una imagen subida a partir de su ruta pública
+ * relativa (`/uploads/...`). En desarrollo la API sirve los archivos en otro
+ * puerto, así que se antepone NEXT_PUBLIC_UPLOADS_BASE_URL; en producción nginx
+ * sirve /uploads en el mismo origen, por lo que la variable queda vacía y la
+ * ruta relativa funciona tal cual. Devuelve null si no hay foto.
+ */
+export function fotoSrc(fotoUrl: string | null | undefined): string | null {
+  if (!fotoUrl) return null;
+  const base = process.env.NEXT_PUBLIC_UPLOADS_BASE_URL ?? "";
+  return `${base}${fotoUrl}`;
+}

@@ -3,8 +3,22 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { fotoSrc } from "@/lib/utils";
 import type { Recolector } from "@/types/api";
 import { RecolectoresTableActions } from "./recolectores-table-actions";
+
+// Iniciales (máx 2) para el fallback del avatar cuando no hay foto.
+function iniciales(nombre: string): string {
+  return (
+    nombre
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase() ?? "")
+      .join("") || "?"
+  );
+}
 
 const generoLabels: Record<string, string> = {
   HOMBRE: "H",
@@ -36,6 +50,21 @@ export const columns: ColumnDef<Recolector>[] = [
   {
     accessorKey: "nombre_completo",
     header: "Nombre",
+    cell: ({ row }) => {
+      const r = row.original;
+      const src = fotoSrc(r.foto_url);
+      return (
+        <div className="flex items-center gap-2">
+          <Avatar className="h-7 w-7">
+            {src ? <AvatarImage src={src} alt={r.nombre_completo} /> : null}
+            <AvatarFallback className="text-[10px]">
+              {iniciales(r.nombre_completo)}
+            </AvatarFallback>
+          </Avatar>
+          <span>{r.nombre_completo}</span>
+        </div>
+      );
+    },
   },
   {
     id: "email",

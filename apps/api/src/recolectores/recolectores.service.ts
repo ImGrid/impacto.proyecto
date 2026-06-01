@@ -8,6 +8,7 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
 import { normalizarCI, normalizarParaComparar } from '../common/helpers';
+import { ImageStorageService } from '../common/services/image-storage.service';
 import {
   CreateRecolectorDto,
   UpdateRecolectorDto,
@@ -30,7 +31,10 @@ const recolectorInclude = {
 
 @Injectable()
 export class RecolectoresService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly imageStorage: ImageStorageService,
+  ) {}
 
   async create(
     dto: CreateRecolectorDto,
@@ -39,7 +43,14 @@ export class RecolectoresService {
     const password_hash = await argon2.hash(dto.password);
     const ciNormalizado = normalizarCI(dto.cedula_identidad);
 
-    return this.prisma.$transaction(async (tx) => {
+    // Procesar la foto (si viene) ANTES de la transacción: valida el formato
+    // y escribe el archivo en disco. Devuelve la ruta pública para BD.
+    const fotoUrl = dto.foto_base64
+      ? await this.imageStorage.saveFromBase64(dto.foto_base64, 'recolectores')
+      : null;
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
       // El departamento_id se deriva de la zona (zona -> ciudad ->
       // departamento). El cliente ya no lo envía: la zona es la única fuente.
       const zona = await tx.zona.findUnique({
@@ -80,6 +91,7 @@ export class RecolectoresService {
               genero: dto.genero,
               edad: dto.edad,
               trabaja_individual: dto.trabaja_individual ?? true,
+              foto_url: fotoUrl,
             },
           },
         },
@@ -127,11 +139,16 @@ export class RecolectoresService {
       }
 
       // 5. Return full recolector with all relations
-      return tx.recolector.findUniqueOrThrow({
-        where: { id: recolectorId },
-        include: recolectorInclude,
+        return tx.recolector.findUniqueOrThrow({
+          where: { id: recolectorId },
+          include: recolectorInclude,
+        });
       });
-    });
+    } catch (err) {
+      // Si la transacción falla, no dejar el archivo de la foto huérfano.
+      await this.imageStorage.deleteByPublicPath(fotoUrl);
+      throw err;
+    }
   }
 
   async findAll(
@@ -220,6 +237,7 @@ export class RecolectoresService {
     // findOne aplica el scope por depto. Si el recolector está en otro
     // departamento, lanza 404 antes de tocar BD.
     const recolector = await this.findOne(id, departamentoActivo);
+    const oldFotoUrl = recolector.foto_url;
 
     // Si cambia la zona, el departamento_id se re-deriva de la nueva zona
     // (zona -> ciudad -> departamento) y debe seguir en el departamento activo.
@@ -241,15 +259,26 @@ export class RecolectoresService {
       departamentoIdNuevo = zona.ciudad.departamento_id;
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // Extract relation arrays and activo from dto
-      const { dias_trabajo, materiales, tipos_generador_ids, activo, ...recolectorData } = dto;
+    // Procesar la nueva foto (si viene) antes de la transacción: valida y
+    // escribe el archivo nuevo. La foto anterior se borra recién al confirmar.
+    const nuevaFotoUrl =
+      dto.foto_base64 !== undefined
+        ? await this.imageStorage.saveFromBase64(dto.foto_base64, 'recolectores')
+        : undefined;
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+      // Extract relation arrays, activo y foto_base64 from dto. foto_base64 NO
+      // es columna: se procesó aparte y se persiste como foto_url.
+      const { dias_trabajo, materiales, tipos_generador_ids, activo, foto_base64, ...recolectorData } = dto;
+      void foto_base64;
 
       // Update recolector fields if any. Si cambió la zona, también se
-      // actualiza el departamento_id derivado.
+      // actualiza el departamento_id derivado. Si se subió foto, se setea foto_url.
       if (
         Object.keys(recolectorData).length > 0 ||
-        departamentoIdNuevo !== undefined
+        departamentoIdNuevo !== undefined ||
+        nuevaFotoUrl !== undefined
       ) {
         await tx.recolector.update({
           where: { id },
@@ -258,6 +287,7 @@ export class RecolectoresService {
             ...(departamentoIdNuevo !== undefined
               ? { departamento_id: departamentoIdNuevo }
               : {}),
+            ...(nuevaFotoUrl !== undefined ? { foto_url: nuevaFotoUrl } : {}),
           },
         });
       }
@@ -325,11 +355,22 @@ export class RecolectoresService {
         }
       }
 
-      return tx.recolector.findUniqueOrThrow({
-        where: { id },
-        include: recolectorInclude,
+        return tx.recolector.findUniqueOrThrow({
+          where: { id },
+          include: recolectorInclude,
+        });
       });
-    });
+
+      // Éxito: si se reemplazó la foto, borrar la anterior.
+      if (nuevaFotoUrl && oldFotoUrl && oldFotoUrl !== nuevaFotoUrl) {
+        await this.imageStorage.deleteByPublicPath(oldFotoUrl);
+      }
+      return result;
+    } catch (err) {
+      // Si la transacción falla, borrar el archivo nuevo recién escrito.
+      if (nuevaFotoUrl) await this.imageStorage.deleteByPublicPath(nuevaFotoUrl);
+      throw err;
+    }
   }
 
   async hardDelete(id: number, departamentoActivo: number | null) {
@@ -337,6 +378,8 @@ export class RecolectoresService {
     await this.prisma.usuario.delete({
       where: { id: recolector.usuario_id },
     });
+    // El cascade borró el recolector; limpiar el archivo de su foto.
+    await this.imageStorage.deleteByPublicPath(recolector.foto_url);
   }
 
   /**

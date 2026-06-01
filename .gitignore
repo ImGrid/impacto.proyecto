@@ -74,3 +74,7 @@ imagenes_playwright/
 
 # Backups de BD y snapshots de schema (no se suben al repo)
 backups/
+
+# Imágenes subidas por usuarios (foto de perfil del recolector). En dev se
+# escriben en apps/api/uploads; en prod viven FUERA del repo (UPLOAD_DIR).
+uploads/

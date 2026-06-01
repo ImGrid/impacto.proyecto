@@ -4,7 +4,9 @@ import dynamic from "next/dynamic";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod/v4";
-import { Loader2, Plus, Trash2, MapPin } from "lucide-react";
+import { useRef } from "react";
+import { toast } from "sonner";
+import { Loader2, Plus, Trash2, MapPin, Camera, X } from "lucide-react";
 import { GENERO_OPTIONS } from "@/lib/constants";
 import {
   useCreateRecolector,
@@ -25,7 +27,7 @@ import type {
   UnidadMedida,
   Zona,
 } from "@/types/api";
-import { normalizarParaComparar } from "@/lib/utils";
+import { normalizarParaComparar, fotoSrc } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -135,6 +137,9 @@ const baseSchema = z.object({
   genero: z.string().min(1, "Seleccione el género"),
   edad: z.string().min(1, "La edad es obligatoria"),
   trabaja_individual: z.boolean().optional(),
+  // Foto de perfil en base64 (data URL). Vacío = sin cambios. Solo se envía
+  // cuando el admin selecciona una imagen nueva.
+  foto_base64: z.string().optional(),
   dias_trabajo: z.array(z.string()).optional(),
   materiales: z.array(materialRowSchema).optional(),
   tipos_generador_ids: z.array(z.string()).optional(),
@@ -296,6 +301,7 @@ function RecolectorForm({
       genero: recolector?.genero ?? "",
       edad: recolector ? String(recolector.edad) : "",
       trabaja_individual: recolector?.trabaja_individual ?? true,
+      foto_base64: "",
       dias_trabajo:
         recolector?.recolector_dia_trabajo.map((d) => d.dia_semana) ?? [],
       materiales:
@@ -337,6 +343,38 @@ function RecolectorForm({
     form.setValue("longitud", parseFloat(lng.toFixed(8)), {
       shouldValidate: true,
     });
+  }
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fotoBase64 = form.watch("foto_base64");
+  // Preview: la imagen recién elegida (data URL) tiene prioridad sobre la foto
+  // actual del recolector (en edición). fotoSrc construye la URL absoluta.
+  const fotoPreview = fotoBase64 || fotoSrc(recolector?.foto_url);
+
+  function handleFotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("El archivo debe ser una imagen (JPG, PNG o WebP).");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("La imagen supera el tamaño máximo (8 MB).");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () =>
+      form.setValue("foto_base64", reader.result as string, {
+        shouldDirty: true,
+      });
+    reader.onerror = () => toast.error("No se pudo leer la imagen.");
+    reader.readAsDataURL(file);
+  }
+
+  // Descarta la imagen recién seleccionada (vuelve a la foto previa o a vacío).
+  function quitarFotoNueva() {
+    form.setValue("foto_base64", "", { shouldDirty: true });
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function onSubmit(data: FormValues) {
@@ -382,6 +420,8 @@ function RecolectorForm({
       genero: data.genero as Genero,
       edad: edadNum,
       trabaja_individual: data.trabaja_individual ?? true,
+      // Solo se envía si el admin seleccionó una imagen nueva (data URL).
+      ...(data.foto_base64 ? { foto_base64: data.foto_base64 } : {}),
       ...(data.asociacion_id
         ? { asociacion_id: Number(data.asociacion_id) }
         : {}),
@@ -460,6 +500,62 @@ function RecolectorForm({
         {/* === SECCIÓN: Datos personales === */}
         <fieldset className="space-y-4">
           <legend className="text-sm font-semibold">Datos personales</legend>
+
+          {/* Foto de perfil (la credencial del recolector) */}
+          <div className="flex items-center gap-4">
+            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full border bg-muted">
+              {fotoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={fotoPreview}
+                  alt="Foto del recolector"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                  <Camera className="h-6 w-6" />
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={handleFotoChange}
+                disabled={isPending}
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isPending}
+                >
+                  <Camera className="mr-1 h-3 w-3" />
+                  {fotoPreview ? "Cambiar foto" : "Subir foto"}
+                </Button>
+                {fotoBase64 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={quitarFotoNueva}
+                    disabled={isPending}
+                  >
+                    <X className="mr-1 h-3 w-3" />
+                    Quitar
+                  </Button>
+                ) : null}
+              </div>
+              <p className="text-muted-foreground text-xs">
+                JPG, PNG o WebP. Máx 8 MB. Se redimensiona a 512px.
+              </p>
+            </div>
+          </div>
+
           <FormField
             control={form.control}
             name="nombre_completo"

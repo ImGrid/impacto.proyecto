@@ -116,6 +116,16 @@ export class CreateRecolectorDto {
   @IsBoolean()
   trabaja_individual?: boolean = true;
 
+  // Foto de perfil del recolector en base64 (con o sin prefijo data:). El
+  // backend la procesa con sharp (WebP, ~512px, sin EXIF) y la guarda en disco;
+  // en BD solo se persiste la ruta (`foto_url`). Opcional. El tope de longitud
+  // es un cortafuegos temprano; el límite real (8 MB del binario) lo valida
+  // ImageStorageService.
+  @IsOptional()
+  @IsString()
+  @MaxLength(12_000_000, { message: 'La imagen es demasiado grande' })
+  foto_base64?: string;
+
   @IsOptional()
   @IsArray()
   @IsEnum(dia_semana, { each: true })

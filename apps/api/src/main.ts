@@ -1,16 +1,26 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { resolve } from 'node:path';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   const configService = app.get(ConfigService);
 
   // Prefijo global para todas las rutas: /api/...
   app.setGlobalPrefix('api');
+
+  // Servir las imágenes subidas en /uploads (fuera del prefijo /api). En
+  // desarrollo las sirve la propia API; en producción nginx intercepta
+  // /uploads antes de llegar aquí (más rápido y la API no es pública).
+  const uploadDir = resolve(
+    configService.get<string>('UPLOAD_DIR') ?? './uploads',
+  );
+  app.useStaticAssets(uploadDir, { prefix: '/uploads' });
 
   // CORS
   app.enableCors({

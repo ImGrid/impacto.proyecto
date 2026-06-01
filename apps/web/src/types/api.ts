@@ -255,6 +255,9 @@ export type Recolector = {
   trabaja_individual: boolean;
   activo: boolean;
   fecha_creacion: string;
+  // Ruta pública relativa de la foto de perfil (ej. /uploads/recolectores/x.webp)
+  // o null si no tiene. Usar fotoSrc() para construir la URL absoluta.
+  foto_url: string | null;
   usuario: {
     email: string | null;
     activo: boolean;
