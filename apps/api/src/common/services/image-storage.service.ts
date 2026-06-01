@@ -7,7 +7,10 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { join, resolve } from 'node:path';
-import sharp from 'sharp';
+// sharp usa `export =` (CommonJS). El tsconfig de la api no tiene
+// esModuleInterop, así que `import sharp from 'sharp'` compila pero en runtime
+// queda como `sharp_1.default` (undefined). La forma correcta es import-require.
+import sharp = require('sharp');
 
 /**
  * Guarda imágenes subidas (hoy: foto de perfil del recolector) como ARCHIVOS
@@ -72,7 +75,9 @@ export class ImageStorageService {
         failOn: 'truncated',
         limitInputPixels: 25_000_000, // ~25 MP: corta "decoder bombs"
       }).metadata();
-    } catch {
+    } catch (e) {
+      // Log del error real (no se expone al usuario) para poder diagnosticar.
+      this.logger.warn(`sharp no pudo leer la imagen: ${(e as Error).message}`);
       throw new BadRequestException('La imagen no es válida o está corrupta');
     }
 
@@ -98,7 +103,8 @@ export class ImageStorageService {
         })
         .webp({ quality: 80 })
         .toBuffer();
-    } catch {
+    } catch (e) {
+      this.logger.warn(`sharp no pudo procesar la imagen: ${(e as Error).message}`);
       throw new BadRequestException('No se pudo procesar la imagen');
     }
 
