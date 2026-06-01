@@ -236,8 +236,10 @@ export default function MapPicker({
 
   return (
     <>
-      {/* Mapa inline (300px) con botón para expandir a pantalla completa. */}
-      <div className="relative">
+      {/* Mapa inline (300px) con botón para expandir a pantalla completa.
+          `isolate` contiene el z-index del botón en un contexto local para que
+          no se cuele por encima del Dialog de pantalla completa (z-50). */}
+      <div className="relative isolate">
         <MapContainer
           center={center}
           zoom={zoom}
@@ -259,7 +261,7 @@ export default function MapPicker({
           // Solo icono (el mapa inline es pequeño); el texto va en el tooltip
           // nativo (title). El buscador "bar" va centrado arriba y el zoom
           // arriba-izquierda, así que la esquina superior derecha queda libre.
-          className="absolute right-2 top-2 z-[1000] shadow-md"
+          className="absolute right-2 top-2 z-10 shadow-md"
           title="Ver el mapa en pantalla completa"
         >
           <Maximize2 className="h-4 w-4" />

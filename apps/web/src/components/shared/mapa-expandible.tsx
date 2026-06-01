@@ -66,7 +66,10 @@ export function MapaExpandible({
 
   return (
     <>
-      <div className="relative">
+      {/* `isolate` crea un contexto de apilamiento local: así el z-index del
+          botón queda contenido y nunca se cuela por encima del Dialog de
+          pantalla completa (que es z-50). */}
+      <div className="relative isolate">
         <MapContainer
           key={mapKey}
           center={center}
@@ -83,7 +86,7 @@ export function MapaExpandible({
           variant="secondary"
           size="sm"
           onClick={() => setExpanded(true)}
-          className="absolute right-2 top-2 z-[1000] gap-1.5 shadow-md"
+          className="absolute right-2 top-2 z-10 gap-1.5 shadow-md"
           title="Ver el mapa en pantalla completa"
         >
           <Maximize2 className="h-4 w-4" />
