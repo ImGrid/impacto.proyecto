@@ -254,15 +254,16 @@ export default function MapPicker({
         <Button
           type="button"
           variant="secondary"
-          size="sm"
+          size="icon"
           onClick={() => setExpanded(true)}
-          // El buscador "bar" de leaflet-geosearch va centrado arriba y el
-          // zoom arriba-izquierda; la esquina superior derecha queda libre.
-          className="absolute right-2 top-2 z-[1000] gap-1.5 shadow-md"
+          // Solo icono (el mapa inline es pequeño); el texto va en el tooltip
+          // nativo (title). El buscador "bar" va centrado arriba y el zoom
+          // arriba-izquierda, así que la esquina superior derecha queda libre.
+          className="absolute right-2 top-2 z-[1000] shadow-md"
           title="Ver el mapa en pantalla completa"
         >
           <Maximize2 className="h-4 w-4" />
-          Pantalla completa
+          <span className="sr-only">Ver el mapa en pantalla completa</span>
         </Button>
       </div>
 

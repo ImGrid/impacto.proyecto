@@ -2,10 +2,11 @@
 
 import { useEffect } from "react";
 import L from "leaflet";
-import { MapContainer, TileLayer, Circle, Popup, useMap } from "react-leaflet";
+import { TileLayer, Circle, Popup, useMap } from "react-leaflet";
 import type { Zona } from "@/types/api";
 import { useDepartamentoActivo } from "@/components/departamento-context";
 import { centroDepartamento } from "@/config/departamento-centros";
+import { MapaExpandible } from "./mapa-expandible";
 
 const DEFAULT_ZOOM = 13;
 
@@ -49,12 +50,11 @@ export default function ZonasMapView({ zonas }: ZonasMapViewProps) {
   const center = centroDepartamento(departamentoActivo);
 
   return (
-    <MapContainer
-      key={String(departamentoActivo)}
+    <MapaExpandible
+      mapKey={String(departamentoActivo)}
       center={center}
       zoom={DEFAULT_ZOOM}
-      className="h-[500px] w-full rounded-md border"
-      style={{ zIndex: 0 }}
+      titulo="Zonas"
     >
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -94,6 +94,6 @@ export default function ZonasMapView({ zonas }: ZonasMapViewProps) {
           </Popup>
         </Circle>
       ))}
-    </MapContainer>
+    </MapaExpandible>
   );
 }
