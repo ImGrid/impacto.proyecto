@@ -7,6 +7,7 @@ import { Truck, CheckCircle2, CalendarIcon, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTransacciones, type TipoDestino } from "@/hooks/use-transacciones";
 import { useZonas } from "@/hooks/use-zonas";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import { useRecolectores } from "@/hooks/use-recolectores";
 import type { EstadoTransaccion, Transaccion } from "@/types/api";
 import { DataTable } from "@/components/shared/data-table";
@@ -104,7 +105,14 @@ export function TransaccionesContent() {
     fecha_hasta: fechaHasta ? format(fechaHasta, "yyyy-MM-dd") : undefined,
   });
 
-  const { data: zonasOpts } = useZonas({ limit: 100, activo: true });
+  // Las zonas del filtro se acotan al departamento activo (igual que el filtro
+  // de recolectora), para no mostrar zonas de otros departamentos.
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: zonasOpts } = useZonas({
+    limit: 100,
+    activo: true,
+    departamentoId: departamentoActivo ?? undefined,
+  });
   // Las recolectoras ya vienen acotadas al departamento activo por el backend.
   // limit 100 es el máximo que admite PaginationQueryDto (@Max(100)).
   const { data: recolectoresOpts } = useRecolectores({
