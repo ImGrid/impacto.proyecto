@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, CheckCircle2, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Transaccion } from "@/types/api";
@@ -36,6 +36,10 @@ function formatMateriales(detalles: Transaccion["detalle_transaccion"]): string 
 export function makeColumns(options: {
   onEdit: (trans: Transaccion) => void;
   onDelete: (trans: Transaccion) => void;
+  // Cambia el estado desde la fila: "Entregar" (RECOLECTADO→ENTREGADO) o
+  // "Volver a recolectada" (ENTREGADO→RECOLECTADO). El diálogo decide cuál
+  // según el estado actual de la transacción.
+  onAdvanceState: (trans: Transaccion) => void;
 }): ColumnDef<Transaccion>[] {
   return [
     {
@@ -137,6 +141,36 @@ export function makeColumns(options: {
         const esPagada = trans.estado === "PAGADO";
         return (
           <div className="flex justify-end gap-1">
+            {trans.estado === "RECOLECTADO" && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  options.onAdvanceState(trans);
+                }}
+                title="Marcar esta recolección como entregada"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Entregar
+              </Button>
+            )}
+            {trans.estado === "ENTREGADO" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1 text-muted-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  options.onAdvanceState(trans);
+                }}
+                title="Devolver esta entrega a recolectada"
+              >
+                <Undo2 className="h-4 w-4" />
+                Volver
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -179,4 +213,5 @@ export function makeColumns(options: {
 export const columns = makeColumns({
   onEdit: () => {},
   onDelete: () => {},
+  onAdvanceState: () => {},
 });

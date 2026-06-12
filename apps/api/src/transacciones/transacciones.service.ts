@@ -60,10 +60,12 @@ const transaccionInclude = {
 
 // Transiciones de estado válidas.
 // El flujo real es GENERADO → RECOLECTADO → ENTREGADO → PAGADO.
+// ENTREGADO → RECOLECTADO es una REVERSA permitida solo al ADMIN y solo si la
+// entrega no fue pagada (se valida con una guarda explícita en `update`).
 const TRANSICIONES_VALIDAS: Record<string, estado_transaccion[]> = {
   GENERADO: ['RECOLECTADO'],
   RECOLECTADO: ['ENTREGADO'],
-  ENTREGADO: ['PAGADO'],
+  ENTREGADO: ['PAGADO', 'RECOLECTADO'],
 };
 
 // Snapshot de materiales que se guarda en `transaccion_historial.detalles`.
@@ -340,6 +342,11 @@ export class TransaccionesService {
       // Cada línea es material del catálogo o un "Otro" de texto libre.
       this.validarDetallesMaterialOtro(dto.detalles);
 
+      // ENTREGADO es el cierre del flujo: cada material debe tener precio.
+      if (estado === 'ENTREGADO') {
+        this.validarPreciosEntregado(dto.detalles);
+      }
+
       // Calcular subtotales y monto total.
       const detallesConSubtotal = dto.detalles.map((d) => ({
         material_id: d.material_id ?? null,
@@ -594,6 +601,26 @@ export class TransaccionesService {
       );
     }
 
+    // Reversa ENTREGADO → RECOLECTADO: solo ADMIN, y solo si la entrega no fue
+    // pagada. Una ENTREGADO nunca tiene pago vinculado (el pago la pasa a
+    // PAGADO), pero lo verificamos por seguridad ante estados inconsistentes.
+    if (transaccion.estado === 'ENTREGADO' && dto.estado === 'RECOLECTADO') {
+      if (userRol !== 'ADMIN') {
+        throw new ForbiddenException(
+          'Solo un administrador puede devolver una entrega a recolectada',
+        );
+      }
+      const pagoVinculado = await this.prisma.pago_transaccion.findUnique({
+        where: { transaccion_id: id },
+        select: { id: true },
+      });
+      if (pagoVinculado) {
+        throw new BadRequestException(
+          'No se puede devolver a recolectada una entrega que ya fue pagada',
+        );
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const updateData: Prisma.transaccionUpdateInput = {
         estado: dto.estado,
@@ -619,6 +646,24 @@ export class TransaccionesService {
 
       // Si es centro operacional verificando, se autoasigna como destino.
       if (dto.estado === 'ENTREGADO') {
+        // ENTREGADO es el cierre del flujo: cada material debe tener precio.
+        // Si vienen detalles nuevos los validamos; si no, validamos los que
+        // ya tiene la entrega (caso típico: avanzar desde la tabla sin tocar
+        // los materiales).
+        if (dto.detalles?.length) {
+          this.validarPreciosEntregado(dto.detalles);
+        } else {
+          const actuales = await tx.detalle_transaccion.findMany({
+            where: { transaccion_id: id },
+            select: { precio_unitario: true },
+          });
+          if (actuales.some((d) => Number(d.precio_unitario ?? 0) <= 0)) {
+            throw new BadRequestException(
+              'Esta entrega tiene materiales sin precio. Agregue los precios antes de marcarla como entregada.',
+            );
+          }
+        }
+
         if (userRol === 'ACOPIADOR') {
           const centro = await tx.centro_operacional.findFirst({
             where: { usuario_id: userId },
@@ -1173,6 +1218,12 @@ export class TransaccionesService {
         }
         this.validarDetallesMaterialOtro(dto.detalles);
 
+        // Si la entrega ya está ENTREGADO, sus materiales no pueden quedar
+        // sin precio al reemplazarlos (RECOLECTADO sí puede ir sin valorar).
+        if (existente.estado === 'ENTREGADO') {
+          this.validarPreciosEntregado(dto.detalles);
+        }
+
         // Validar sucursales same-depto con el recolector resultante.
         const recolectorIdEfectivo =
           dto.recolector_id ?? existente.recolector_id;
@@ -1331,6 +1382,22 @@ export class TransaccionesService {
       throw new BadRequestException(
         'Solo se puede indicar un destino: centro operacional, acopiador externo o desconocido (no varios al mismo tiempo)',
       );
+    }
+  }
+
+  /**
+   * Una entrega ENTREGADO representa el cierre del flujo: cada material debe
+   * tener un precio mayor a 0, para que `monto_total` nunca quede en 0 por
+   * olvido. RECOLECTADO no lo exige (el material recogido puede registrarse
+   * sin valorar todavía).
+   */
+  private validarPreciosEntregado(detalles: DetalleTransaccionDto[]): void {
+    for (const d of detalles) {
+      if ((d.precio_unitario ?? 0) <= 0) {
+        throw new BadRequestException(
+          'Cada material debe tener un precio mayor a 0 para marcar la entrega como entregada',
+        );
+      }
     }
   }
 

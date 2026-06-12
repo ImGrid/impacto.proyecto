@@ -144,6 +144,51 @@ export function useEditTransaccionAdmin(id: number) {
 }
 
 /**
+ * Cambia el estado de una entrega desde la tabla (PATCH /transacciones/:id).
+ * - "Entregar": RECOLECTADO → ENTREGADO. Si la entrega no tiene destino, el
+ *   diálogo pasa `marcarDesconocido` y antes de avanzar se setea el destino a
+ *   "Desconocido" vía PATCH /editar (el endpoint de avance no toca el destino).
+ * - "Volver a recolectada": ENTREGADO → RECOLECTADO. El backend lo bloquea si
+ *   la entrega ya fue pagada.
+ */
+export function useAvanzarEstadoTransaccion() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      estado,
+      marcarDesconocido,
+    }: {
+      id: number;
+      estado: EstadoTransaccion;
+      marcarDesconocido?: boolean;
+    }) => {
+      if (marcarDesconocido) {
+        await clientPatch<TransaccionDetalle>(`/transacciones/${id}/editar`, {
+          destino_desconocido: true,
+        } satisfies EditTransaccionAdminInput);
+      }
+      return clientPatch<TransaccionDetalle>(`/transacciones/${id}`, { estado });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: transaccionesKeys.lists() });
+      queryClient.invalidateQueries({
+        queryKey: transaccionesKeys.detail(variables.id),
+      });
+      toast.success(
+        variables.estado === "ENTREGADO"
+          ? "Entrega marcada como entregada"
+          : "Entrega devuelta a recolectada",
+      );
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}
+
+/**
  * Hard delete de una entrega. El backend bloquea con 400 si la entrega
  * tiene un pago registrado.
  */

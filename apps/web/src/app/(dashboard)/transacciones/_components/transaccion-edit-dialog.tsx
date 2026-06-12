@@ -326,6 +326,23 @@ function EditForm({
   const tipoDestino = form.watch("tipo_destino");
 
   function onSubmit(data: FormValues) {
+    // Una entrega ya ENTREGADO no puede quedar con materiales sin precio.
+    // (El backend también lo valida; esto muestra el error inline en el campo.)
+    if (transaccion.estado === "ENTREGADO") {
+      let hayError = false;
+      data.detalles.forEach((d, i) => {
+        const n = parsearDecimal(d.precio_unitario);
+        if (n == null || n <= 0) {
+          form.setError(`detalles.${i}.precio_unitario`, {
+            type: "manual",
+            message: "El precio es obligatorio en una entrega",
+          });
+          hayError = true;
+        }
+      });
+      if (hayError) return;
+    }
+
     const payload: EditTransaccionAdminInput = {};
 
     if ((data.observaciones ?? "") !== (transaccion.observaciones ?? "")) {

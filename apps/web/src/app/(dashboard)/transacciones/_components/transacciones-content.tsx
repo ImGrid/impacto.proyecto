@@ -29,6 +29,7 @@ import { makeColumns } from "./columns";
 import { TransaccionDetailDialog } from "./transaccion-detail-dialog";
 import { TransaccionDeleteDialog } from "./transaccion-delete-dialog";
 import { TransaccionEditDialog } from "./transaccion-edit-dialog";
+import { TransaccionAdvanceStateDialog } from "./transaccion-advance-state-dialog";
 import {
   TransaccionFormDialog,
   type FormMode,
@@ -69,6 +70,8 @@ export function TransaccionesContent() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Transaccion | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [advanceTarget, setAdvanceTarget] = useState<Transaccion | null>(null);
+  const [advanceOpen, setAdvanceOpen] = useState(false);
 
   function openCreate(mode: FormMode) {
     setCreateMode(mode);
@@ -83,6 +86,11 @@ export function TransaccionesContent() {
   function openDelete(t: Transaccion) {
     setDeleteTarget(t);
     setDeleteOpen(true);
+  }
+
+  function openAdvance(t: Transaccion) {
+    setAdvanceTarget(t);
+    setAdvanceOpen(true);
   }
 
   const { data, isLoading } = useTransacciones({
@@ -134,7 +142,11 @@ export function TransaccionesContent() {
 
   // Columnas con click en la fila para abrir detalle, y botones Editar/Eliminar
   // en la columna Acciones (que tienen stopPropagation).
-  const baseColumns = makeColumns({ onEdit: openEdit, onDelete: openDelete });
+  const baseColumns = makeColumns({
+    onEdit: openEdit,
+    onDelete: openDelete,
+    onAdvanceState: openAdvance,
+  });
   const clickableColumns = baseColumns.map((col) => {
     if (col.id === "acciones") return col;
     return {
@@ -351,6 +363,16 @@ export function TransaccionesContent() {
         transaccion={deleteTarget}
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
+      />
+
+      <TransaccionAdvanceStateDialog
+        transaccion={advanceTarget}
+        open={advanceOpen}
+        onOpenChange={setAdvanceOpen}
+        onEditInstead={(t) => {
+          setAdvanceOpen(false);
+          openEdit(t);
+        }}
       />
     </div>
   );
