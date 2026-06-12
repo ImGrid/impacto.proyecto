@@ -57,10 +57,16 @@ export function makeColumns(options: {
     {
       id: "recolector",
       header: "Recolector",
-      cell: ({ row }) =>
-        row.original.recolector?.nombre_completo ?? (
+      cell: ({ row }) => {
+        const nombre = row.original.recolector?.nombre_completo;
+        return nombre ? (
+          <span className="block max-w-[150px] truncate" title={nombre}>
+            {nombre}
+          </span>
+        ) : (
           <span className="text-muted-foreground">—</span>
-        ),
+        );
+      },
     },
     {
       id: "destino",
@@ -111,11 +117,17 @@ export function makeColumns(options: {
     {
       id: "materiales",
       header: "Materiales",
-      cell: ({ row }) => (
-        <span className="max-w-[200px] truncate block text-sm">
-          {formatMateriales(row.original.detalle_transaccion)}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const txt = formatMateriales(row.original.detalle_transaccion);
+        return (
+          <span
+            className="block max-w-[150px] truncate text-sm"
+            title={txt}
+          >
+            {txt}
+          </span>
+        );
+      },
     },
     {
       id: "monto",
@@ -148,32 +160,32 @@ export function makeColumns(options: {
           <div className="flex justify-end gap-1">
             {trans.estado === "RECOLECTADO" && (
               <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
                 onClick={(e) => {
                   e.stopPropagation();
                   options.onAdvanceState(trans);
                 }}
-                title="Marcar esta recolección como entregada"
+                aria-label="Entregar"
+                title="Marcar como entregada"
               >
                 <CheckCircle2 className="h-4 w-4" />
-                Entregar
               </Button>
             )}
             {trans.estado === "ENTREGADO" && (
               <Button
                 variant="ghost"
-                size="sm"
-                className="h-8 gap-1 text-muted-foreground"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground"
                 onClick={(e) => {
                   e.stopPropagation();
                   options.onAdvanceState(trans);
                 }}
-                title="Devolver esta entrega a recolectada"
+                aria-label="Volver a recolectada"
+                title="Volver a recolectada"
               >
                 <Undo2 className="h-4 w-4" />
-                Volver
               </Button>
             )}
             <Button
