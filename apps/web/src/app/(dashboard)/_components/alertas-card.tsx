@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Clock, CreditCard, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Clock, CreditCard, CheckCircle2, Coins } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -22,6 +22,7 @@ interface AlertasCardProps {
   pendientes_pago_count: number;
   pendientes_pago_monto: number;
   pendientes_verificacion_count: number;
+  pendientes_precio_count: number;
 }
 
 function formatBs(n: number) {
@@ -35,9 +36,12 @@ export function AlertasCard({
   pendientes_pago_count,
   pendientes_pago_monto,
   pendientes_verificacion_count,
+  pendientes_precio_count,
 }: AlertasCardProps) {
   const todoAlDia =
-    pendientes_pago_count === 0 && pendientes_verificacion_count === 0;
+    pendientes_pago_count === 0 &&
+    pendientes_verificacion_count === 0 &&
+    pendientes_precio_count === 0;
 
   return (
     <Card>
@@ -77,6 +81,19 @@ export function AlertasCard({
               href="/transacciones?estado=RECOLECTADO"
               linkLabel="Ver"
             />
+            <AlertaFila
+              icon={<Coins className="h-5 w-5" />}
+              color="violet"
+              visible={pendientes_precio_count > 0}
+              label={`${pendientes_precio_count} ${
+                pendientes_precio_count === 1
+                  ? "recolección sin precio"
+                  : "recolecciones sin precio"
+              }`}
+              detail="Cuentan en kg/CO₂ pero aún no suman a los ingresos (Bs)"
+              href="/transacciones?estado=RECOLECTADO"
+              linkLabel="Poner precio"
+            />
           </>
         )}
       </CardContent>
@@ -94,7 +111,7 @@ function AlertaFila({
   linkLabel,
 }: {
   icon: React.ReactNode;
-  color: "amber" | "sky";
+  color: "amber" | "sky" | "violet";
   visible: boolean;
   label: string;
   detail: string;
@@ -106,6 +123,8 @@ function AlertaFila({
     amber:
       "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300",
     sky: "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300",
+    violet:
+      "border-violet-200 bg-violet-50 text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-violet-300",
   } as const;
 
   return (

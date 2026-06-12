@@ -14,7 +14,7 @@ import { useMateriales } from "@/hooks/use-materiales";
 import { useCentrosOperacionales } from "@/hooks/use-centros-operacionales";
 import { useExternos } from "@/hooks/use-externos";
 import type { UnidadMedida, CreateTransaccionInput } from "@/types/api";
-import { cn } from "@/lib/utils";
+import { cn, parsearDecimal } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -85,9 +85,21 @@ const baseDetalle = z.object({
   cantidad: z
     .string()
     .min(1, "Cantidad obligatoria")
-    .refine((v) => Number(v) > 0, "La cantidad debe ser mayor a 0"),
+    .refine((v) => {
+      const n = parsearDecimal(v);
+      return n != null && n > 0;
+    }, "La cantidad debe ser mayor a 0"),
   unidad_medida: z.enum(["KG", "UNIDAD", "BOLSA", "TONELADA"]),
-  precio_unitario: z.string().optional(),
+  // Opcional aquí; en modo "entrega" se exige por separado en superRefine.
+  // Si se escribe algo, debe ser un número válido ≥ 0.
+  precio_unitario: z
+    .string()
+    .optional()
+    .refine((v) => {
+      if (!v || v.trim() === "") return true;
+      const n = parsearDecimal(v);
+      return n != null && n >= 0;
+    }, "Precio inválido"),
   // Sucursal de origen de esta línea (opcional). Permite indicar que el
   // material provino de un punto específico — útil cuando el recolector
   // consolida material de varias sucursales en una sola entrega.
@@ -131,7 +143,8 @@ function buildSchema(mode: FormMode) {
       if (mode === "entrega") {
         // Precio obligatorio para cada material.
         data.detalles.forEach((d, i) => {
-          if (!d.precio_unitario || Number(d.precio_unitario) <= 0) {
+          const precio = parsearDecimal(d.precio_unitario);
+          if (precio == null || precio <= 0) {
             ctx.addIssue({
               code: "custom",
               path: ["detalles", i, "precio_unitario"],
@@ -252,11 +265,11 @@ export function TransaccionFormDialog({
         ...(d.material_id === MATERIAL_OTRO
           ? { nombre_personalizado: d.nombre_personalizado?.trim() }
           : { material_id: Number(d.material_id) }),
-        cantidad: Number(d.cantidad),
+        cantidad: parsearDecimal(d.cantidad) ?? 0,
         unidad_medida: d.unidad_medida,
         precio_unitario:
-          mode === "entrega" && d.precio_unitario
-            ? Number(d.precio_unitario)
+          mode === "entrega"
+            ? parsearDecimal(d.precio_unitario) ?? undefined
             : undefined,
         ...(d.sucursal_id ? { sucursal_id: Number(d.sucursal_id) } : {}),
       })),
@@ -597,8 +610,8 @@ export function TransaccionFormDialog({
                       <FormItem className="col-span-2">
                         <FormControl>
                           <Input
-                            type="number"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             placeholder="Cant."
                             disabled={isPending}
                             {...inputField}
@@ -645,8 +658,8 @@ export function TransaccionFormDialog({
                         <FormItem className="col-span-3">
                           <FormControl>
                             <Input
-                              type="number"
-                              step="any"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="Precio (Bs)"
                               disabled={isPending}
                               {...inputField}

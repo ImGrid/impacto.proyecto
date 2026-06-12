@@ -26,7 +26,7 @@ import type {
   TransaccionDetalle,
   UnidadMedida,
 } from "@/types/api";
-import { cn } from "@/lib/utils";
+import { cn, parsearDecimal, fechaSoloDesdeISO } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -90,9 +90,22 @@ const detalleSchema = z.object({
   cantidad: z
     .string()
     .min(1, "Cantidad obligatoria")
-    .refine((v) => Number(v) > 0, "La cantidad debe ser mayor a 0"),
+    .refine((v) => {
+      const n = parsearDecimal(v);
+      return n != null && n > 0;
+    }, "La cantidad debe ser mayor a 0"),
   unidad_medida: z.enum(["KG", "UNIDAD", "BOLSA", "TONELADA"]),
-  precio_unitario: z.string().optional(),
+  // Opcional (una recolección puede no tener precio aún). Pero si se escribe
+  // algo, debe ser un número válido ≥ 0 — así un valor inválido muestra error
+  // en vez de perderse en silencio (bug histórico con la coma decimal).
+  precio_unitario: z
+    .string()
+    .optional()
+    .refine((v) => {
+      if (!v || v.trim() === "") return true;
+      const n = parsearDecimal(v);
+      return n != null && n >= 0;
+    }, "Precio inválido"),
   // Sucursal de origen de esta línea (opcional). Permite indicar que el
   // material provino de un punto específico.
   sucursal_id: z.string().optional(),
@@ -265,7 +278,9 @@ function EditForm({
       recolector_id: transaccion.recolector_id
         ? String(transaccion.recolector_id)
         : "",
-      fecha: transaccion.fecha ? new Date(transaccion.fecha) : undefined,
+      // @db.Date llega como medianoche UTC; lo pasamos a un Date local del
+      // mismo día para que el calendario y el guardado no corran un día.
+      fecha: fechaSoloDesdeISO(transaccion.fecha),
       hora: horaStr,
       tipo_destino: deriveTipoDestino(transaccion),
       centro_operacional_id: transaccion.centro_operacional_id
@@ -319,8 +334,12 @@ function EditForm({
 
     if (!esPagada) {
       // Fecha y hora
+      // El día almacenado son los primeros 10 chars del ISO (@db.Date en UTC).
+      // Comparar contra eso evita el corrimiento de zona horaria; data.fecha es
+      // un Date local del día correcto, así que format(...,"yyyy-MM-dd") da el
+      // día real sin retroceder.
       const fechaOriginal = transaccion.fecha
-        ? format(new Date(transaccion.fecha), "yyyy-MM-dd")
+        ? transaccion.fecha.slice(0, 10)
         : "";
       if (data.fecha) {
         const fechaNueva = format(data.fecha, "yyyy-MM-dd");
@@ -382,11 +401,11 @@ function EditForm({
         ...(d.material_id === MATERIAL_OTRO
           ? { nombre_personalizado: d.nombre_personalizado?.trim() }
           : { material_id: Number(d.material_id) }),
-        cantidad: Number(d.cantidad),
+        cantidad: parsearDecimal(d.cantidad) ?? 0,
         unidad_medida: d.unidad_medida,
-        precio_unitario: d.precio_unitario
-          ? Number(d.precio_unitario)
-          : undefined,
+        // null (vacío) → undefined: omite el precio (recolección sin valorar).
+        // Un número válido (incluido 0) se envía tal cual.
+        precio_unitario: parsearDecimal(d.precio_unitario) ?? undefined,
         ...(d.sucursal_id ? { sucursal_id: Number(d.sucursal_id) } : {}),
       }));
     }
@@ -677,8 +696,8 @@ function EditForm({
                       <FormItem className="col-span-2">
                         <FormControl>
                           <Input
-                            type="number"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             placeholder="Cant."
                             disabled={editMutation.isPending}
                             {...inputField}
@@ -722,8 +741,8 @@ function EditForm({
                       <FormItem className="col-span-3">
                         <FormControl>
                           <Input
-                            type="number"
-                            step="any"
+                            type="text"
+                            inputMode="decimal"
                             placeholder="Precio (Bs)"
                             disabled={editMutation.isPending}
                             {...inputField}

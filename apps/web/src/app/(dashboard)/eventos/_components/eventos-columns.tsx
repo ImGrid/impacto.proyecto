@@ -3,9 +3,11 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import type { Evento } from "@/types/api";
 import { EventosTableActions } from "./eventos-table-actions";
+import { formatearFechaSolo } from "@/lib/utils";
 
+// fecha_evento es @db.Date: formatear en UTC para que no retroceda un día.
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("es-BO", {
+  return formatearFechaSolo(dateStr, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",

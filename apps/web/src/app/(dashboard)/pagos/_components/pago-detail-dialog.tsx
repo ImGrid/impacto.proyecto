@@ -9,10 +9,12 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatearFechaSolo } from "@/lib/utils";
 
+// Fechas @db.Date (fecha_pago, fecha de transacción) formateadas en UTC para
+// que no retrocedan un día. Mes largo para el detalle.
 function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString("es-BO", {
+  return formatearFechaSolo(dateStr, {
     day: "2-digit",
     month: "long",
     year: "numeric",

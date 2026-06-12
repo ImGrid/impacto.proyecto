@@ -12,7 +12,7 @@ import {
 } from "@/hooks/use-precios-material";
 import { useMateriales } from "@/hooks/use-materiales";
 import type { Material, PrecioMaterial } from "@/types/api";
-import { cn } from "@/lib/utils";
+import { cn, fechaSoloDesdeISO } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -153,9 +153,15 @@ function PrecioForm({ precio, materiales, onClose }: PrecioFormProps) {
       material_id: precio ? String(precio.material_id) : "",
       precio_minimo: precio ? String(Number(precio.precio_minimo)) : "",
       precio_maximo: precio ? String(Number(precio.precio_maximo)) : "",
-      fecha_inicio: precio ? new Date(precio.fecha_inicio) : new Date(),
+      // @db.Date: a Date local del mismo día para que el calendario y el
+      // guardado (format yyyy-MM-dd) no corran un día.
+      fecha_inicio: precio
+        ? fechaSoloDesdeISO(precio.fecha_inicio) ?? new Date()
+        : new Date(),
       fecha_fin:
-        precio && precio.fecha_fin ? new Date(precio.fecha_fin) : undefined,
+        precio && precio.fecha_fin
+          ? fechaSoloDesdeISO(precio.fecha_fin)
+          : undefined,
     },
   });
 

@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatearFechaSolo } from "@/lib/utils";
 
 const estadoBadgeConfig: Record<
   string,
@@ -182,7 +183,7 @@ export function TransaccionDetailDialog({
               <div>
                 <p className="text-muted-foreground">Fecha</p>
                 <p className="font-medium">
-                  {new Date(transaccion.fecha).toLocaleDateString("es-BO", {
+                  {formatearFechaSolo(transaccion.fecha, {
                     day: "2-digit",
                     month: "long",
                     year: "numeric",

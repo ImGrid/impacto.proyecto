@@ -12,7 +12,7 @@ import { useCreateEvento, useUpdateEvento } from "@/hooks/use-eventos";
 import { useZonas } from "@/hooks/use-zonas";
 import { useDepartamentoActivo } from "@/components/departamento-context";
 import type { Evento, Zona } from "@/types/api";
-import { cn } from "@/lib/utils";
+import { cn, fechaSoloDesdeISO } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -143,8 +143,10 @@ function EventoForm({ evento, zonas, onClose }: EventoFormProps) {
       descripcion: evento?.descripcion ?? "",
       zona_id: evento ? String(evento.zona_id) : "",
       direccion: evento?.direccion ?? "",
+      // @db.Date: a Date local del mismo día para que el calendario y el
+      // guardado (format yyyy-MM-dd) no corran un día.
       fecha_evento: evento
-        ? new Date(evento.fecha_evento)
+        ? fechaSoloDesdeISO(evento.fecha_evento) ?? new Date()
         : new Date(),
       hora_inicio: evento?.hora_inicio
         ? new Date(evento.hora_inicio).toLocaleTimeString("es-BO", {

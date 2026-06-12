@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Recycle, Wallet, Leaf, Users } from "lucide-react";
+import { Recycle, Wallet, Leaf, Users, Coins } from "lucide-react";
 import { useEstadisticas } from "@/hooks/use-estadisticas";
 import type { EstadisticasFilters } from "@/types/api";
 import { KpiCard } from "../_components/kpi-card";
@@ -85,6 +85,22 @@ export default function EstadisticasPage() {
           loading={isLoading}
         />
       </div>
+
+      {/* Aviso: recolecciones sin precio. Cuentan en kg/CO₂ pero no en Bs, por
+          eso el volumen puede ser mayor que lo generado en Bs. */}
+      {data && data.pendientes_precio_count > 0 && (
+        <div className="flex items-center gap-3 rounded-md border border-violet-200 bg-violet-50 p-3 text-sm text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-violet-300">
+          <Coins className="h-5 w-5 shrink-0" />
+          <span>
+            {data.pendientes_precio_count}{" "}
+            {data.pendientes_precio_count === 1
+              ? "recolección del período no tiene precio"
+              : "recolecciones del período no tienen precio"}
+            . Cuentan en los kilos y el CO₂, pero no en los ingresos (Bs) hasta
+            que se les asigne un precio.
+          </span>
+        </div>
+      )}
 
       {/* Evolución diaria */}
       {data && <EvolucionDiariaChart items={data.evolucion_diaria} />}

@@ -4,6 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import type { PrecioMaterial, EstadoPrecio, UnidadMedida } from "@/types/api";
 import { PreciosMaterialTableActions } from "./precios-material-table-actions";
+import { formatearFechaSolo } from "@/lib/utils";
 
 const unidadLabels: Record<UnidadMedida, string> = {
   KG: "Kg",
@@ -21,8 +22,10 @@ const estadoBadge: Record<
   VENCIDO: { label: "Vencido", variant: "secondary" },
 };
 
+// fecha_inicio / fecha_fin son @db.Date: formatear en UTC para que no
+// retrocedan un día.
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("es-BO", {
+  return formatearFechaSolo(dateStr, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",

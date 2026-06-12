@@ -3,15 +3,7 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import type { Pago } from "@/types/api";
-
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString("es-BO", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
+import { formatearFechaSolo } from "@/lib/utils";
 
 export const columns: ColumnDef<Pago>[] = [
   {
@@ -24,7 +16,7 @@ export const columns: ColumnDef<Pago>[] = [
   {
     id: "fecha",
     header: "Fecha",
-    cell: ({ row }) => formatDate(row.original.fecha_pago),
+    cell: ({ row }) => formatearFechaSolo(row.original.fecha_pago),
   },
   {
     id: "recolector",

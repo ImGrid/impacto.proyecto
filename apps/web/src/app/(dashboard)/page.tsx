@@ -91,6 +91,7 @@ export default function DashboardPage() {
           pendientes_verificacion_count={
             data.alertas.pendientes_verificacion_count
           }
+          pendientes_precio_count={data.alertas.pendientes_precio_count}
         />
       )}
 

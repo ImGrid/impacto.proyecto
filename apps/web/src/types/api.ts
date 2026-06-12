@@ -516,6 +516,9 @@ export type DashboardData = {
     pendientes_pago_count: number;
     pendientes_pago_monto: number;
     pendientes_verificacion_count: number;
+    // Recolecciones registradas sin precio (monto 0): cuentan en volumen
+    // (kg/CO₂) pero aún no aportan a los Bs. Tarea pendiente: ponerles precio.
+    pendientes_precio_count: number;
   };
   evolucion_mensual: { mes: string; kg: number; bs: number }[];
   distribucion_material: {
@@ -561,6 +564,9 @@ export type EstadisticasData = {
     prev_hasta: string;
   };
   kpis: DashboardData["kpis"];
+  // Recolecciones del rango sin precio (monto 0): cuentan en volumen pero no
+  // en Bs. Indicador para que se entienda por qué el kg puede superar al Bs.
+  pendientes_precio_count: number;
   por_recolectora: {
     id: number;
     nombre: string;

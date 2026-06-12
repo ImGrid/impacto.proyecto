@@ -22,6 +22,23 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * Estados que representan material realmente recolectado y por tanto cuentan
+   * en las métricas de VOLUMEN (kg, CO₂, recolectoras activas) y en sus
+   * desgloses. Se excluye GENERADO (es solo un aviso del generador, sin
+   * recolección física ni recolector asignado).
+   *
+   * Para el DINERO (Bs) se suma `monto_total` sobre estos mismos registros:
+   * como una recolección sin precio tiene `monto_total = 0`, solo las que sí
+   * tienen precio aportan a los Bs. Así "se separa volumen y dinero" sin
+   * distorsionar los ingresos (decisión de producto, junio 2026).
+   */
+  private readonly estadosConMaterial = [
+    'RECOLECTADO',
+    'ENTREGADO',
+    'PAGADO',
+  ] as const;
+
+  /**
    * Devuelve el fragmento `where` que filtra transacciones por el
    * departamento activo del admin. Como una transacción no tiene
    * `departamento_id` directo, se infiere por el recolector (si lo hay)
@@ -64,12 +81,15 @@ export class DashboardService {
       transSeisMeses,
       pendientesPago,
       pendientesVerif,
+      pendientesPrecio,
     ] = await Promise.all([
-      // Entregas del mes actual: solo las que ya tienen precio (ENTREGADO/PAGADO).
+      // Material recolectado del mes actual. Volumen (kg/CO₂) cuenta todo
+      // RECOLECTADO/ENTREGADO/PAGADO; los Bs salen del monto_total, que es 0
+      // en las recolecciones sin precio (ver `estadosConMaterial`).
       this.prisma.transaccion.findMany({
         where: {
           ...scope,
-          estado: { in: ['ENTREGADO', 'PAGADO'] },
+          estado: { in: [...this.estadosConMaterial] },
           fecha: { gte: mesActualDesde, lte: mesActualHasta },
         },
         include: this.transaccionDashboardInclude(),
@@ -78,16 +98,16 @@ export class DashboardService {
       this.prisma.transaccion.findMany({
         where: {
           ...scope,
-          estado: { in: ['ENTREGADO', 'PAGADO'] },
+          estado: { in: [...this.estadosConMaterial] },
           fecha: { gte: mesPrevDesde, lte: mesPrevHasta },
         },
         include: this.transaccionDashboardInclude(),
       }),
-      // Serie 6 meses: todas las ENTREGADO/PAGADO.
+      // Serie 6 meses.
       this.prisma.transaccion.findMany({
         where: {
           ...scope,
-          estado: { in: ['ENTREGADO', 'PAGADO'] },
+          estado: { in: [...this.estadosConMaterial] },
           fecha: { gte: seisMesesDesde, lte: mesActualHasta },
         },
         include: {
@@ -108,6 +128,16 @@ export class DashboardService {
       // Entregas RECOLECTADO: esperando que el acopiador verifique.
       this.prisma.transaccion.count({
         where: { ...scope, estado: 'RECOLECTADO' },
+      }),
+      // Recolecciones registradas sin precio (monto 0): cuentan en volumen
+      // pero todavía no aportan a los Bs. Es la tarea pendiente "ponerles
+      // precio" que se muestra como indicador.
+      this.prisma.transaccion.count({
+        where: {
+          ...scope,
+          estado: { in: ['RECOLECTADO', 'ENTREGADO'] },
+          monto_total: 0,
+        },
       }),
     ]);
 
@@ -132,6 +162,7 @@ export class DashboardService {
           0,
         ),
         pendientes_verificacion_count: pendientesVerif,
+        pendientes_precio_count: pendientesPrecio,
       },
       evolucion_mensual: this.evolucionMensual(transSeisMeses, now),
       distribucion_material: this.distribucionMaterial(transMesActual),
@@ -435,9 +466,11 @@ export class DashboardService {
     // Fragmento que scope-a transacciones al depto activo del admin.
     const scope = this.scopeDepartamento(departamentoActivo);
 
+    // Volumen cuenta todo el material recolectado (RECOLECTADO/ENTREGADO/
+    // PAGADO); los Bs solo reflejan lo que tiene precio (monto 0 no aporta).
     const whereBase: Prisma.transaccionWhereInput = {
       ...scope,
-      estado: { in: ['ENTREGADO', 'PAGADO'] },
+      estado: { in: [...this.estadosConMaterial] },
     };
 
     // Zona y Ciudad apuntan ambas a la relación `zona`; se combinan en un
@@ -521,6 +554,12 @@ export class DashboardService {
     const kpisActual = this.calcularKpis(transActual, query.material_id);
     const kpisPrev = this.calcularKpis(transPrev, query.material_id);
 
+    // Recolecciones del rango registradas sin precio (monto 0): cuentan en
+    // volumen pero no aportan a los Bs. Indicador "pendientes de precio".
+    const pendientesPrecio = transActual.filter(
+      (t) => Number(t.monto_total) === 0,
+    ).length;
+
     return {
       rango: {
         desde: desde.toISOString(),
@@ -538,6 +577,7 @@ export class DashboardService {
         recolectoras_activas: kpisActual.recolectoras,
         recolectoras_activas_prev: kpisPrev.recolectoras,
       },
+      pendientes_precio_count: pendientesPrecio,
       por_recolectora: this.rankingRecolectoras(transActual, query.material_id),
       por_sucursal: this.rankingSucursales(transActual, query.material_id),
       por_material: this.rankingMateriales(transActual, query.material_id),
@@ -614,6 +654,7 @@ export class DashboardService {
         recolectoras_activas: 0,
         recolectoras_activas_prev: 0,
       },
+      pendientes_precio_count: 0,
       por_recolectora: [],
       por_sucursal: [],
       por_material: [],
@@ -964,6 +1005,17 @@ export class DashboardService {
     }));
   }
 
+  /**
+   * Clave de día (YYYY-MM-DD) para agrupar la serie temporal. Usa getters
+   * LOCALES, lo cual es correcto SIEMPRE QUE el proceso Node corra en UTC
+   * (es el caso del VPS: `Etc/UTC`). En UTC, los getters locales coinciden
+   * con los UTC y agrupan los `@db.Date` (medianoche UTC) en su día real.
+   *
+   * Si algún día se moviera el servidor a otra zona, habría que migrar TODO
+   * el bucketing (cursor de días/meses + parseo del rango) a UTC de forma
+   * coordinada para no introducir off-by-one en los límites del rango. No se
+   * hace ahora para no arriesgar una regresión sobre lógica que hoy funciona.
+   */
   private fechaKey(d: Date): string {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');

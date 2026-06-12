@@ -5,6 +5,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Transaccion } from "@/types/api";
+import { formatearFechaSolo } from "@/lib/utils";
 
 const estadoConfig: Record<
   string,
@@ -15,15 +16,6 @@ const estadoConfig: Record<
   ENTREGADO: { label: "Entregado", variant: "default" },
   PAGADO: { label: "Pagado", variant: "default" },
 };
-
-function formatDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString("es-BO", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
 
 function formatMateriales(detalles: Transaccion["detalle_transaccion"]): string {
   if (!detalles || detalles.length === 0) return "—";
@@ -56,7 +48,7 @@ export function makeColumns(options: {
     {
       id: "fecha",
       header: "Fecha",
-      cell: ({ row }) => formatDate(row.original.fecha),
+      cell: ({ row }) => formatearFechaSolo(row.original.fecha),
     },
     {
       id: "recolector",
