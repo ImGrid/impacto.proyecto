@@ -117,6 +117,11 @@ export function TransaccionesContent() {
     label: r.nombre_completo,
   }));
 
+  const zonaOptions = (zonasOpts?.data ?? []).map((z) => ({
+    value: String(z.id),
+    label: z.nombre,
+  }));
+
   const hasFilters =
     estado !== undefined ||
     zonaId !== undefined ||
@@ -196,25 +201,19 @@ export function TransaccionesContent() {
           </SelectContent>
         </Select>
 
-        <Select
-          value={zonaId === undefined ? "all" : String(zonaId)}
-          onValueChange={(value) => {
-            setZonaId(value === "all" ? undefined : Number(value));
+        <SearchableSelect
+          options={zonaOptions}
+          value={zonaId !== undefined ? String(zonaId) : undefined}
+          onChange={(v) => {
+            setZonaId(v === undefined ? undefined : Number(v));
             setPage(1);
           }}
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Zona" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas las zonas</SelectItem>
-            {zonasOpts?.data.map((z) => (
-              <SelectItem key={z.id} value={String(z.id)}>
-                {z.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="Zona"
+          searchPlaceholder="Buscar zona..."
+          allLabel="Todas las zonas"
+          emptyText="Sin zonas"
+          className="w-[180px]"
+        />
 
         <SearchableSelect
           options={recolectorOptions}
