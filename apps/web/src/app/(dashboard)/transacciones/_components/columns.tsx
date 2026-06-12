@@ -68,24 +68,34 @@ export function makeColumns(options: {
       cell: ({ row }) => {
         const t = row.original;
         // Destino polimórfico. Máximo uno marcado por CHECK constraint en BD.
+        // Se acota el ancho (truncate + tooltip nativo) para que la tabla no
+        // crezca a lo ancho con nombres largos de centros/externos.
         if (t.centro_operacional) {
           return (
-            <span className="text-sm">
-              {t.centro_operacional.nombre_completo}
-              <span className="text-muted-foreground text-xs block">
+            <div className="max-w-[180px]">
+              <span
+                className="block truncate text-sm"
+                title={t.centro_operacional.nombre_completo}
+              >
+                {t.centro_operacional.nombre_completo}
+              </span>
+              <span className="text-muted-foreground text-xs">
                 {t.centro_operacional.nombre_punto}
               </span>
-            </span>
+            </div>
           );
         }
         if (t.acopiador_comprador_externo) {
           return (
-            <span className="text-sm">
-              {t.acopiador_comprador_externo.nombre}
-              <span className="text-muted-foreground text-xs block">
-                Externo
+            <div className="max-w-[180px]">
+              <span
+                className="block truncate text-sm"
+                title={t.acopiador_comprador_externo.nombre}
+              >
+                {t.acopiador_comprador_externo.nombre}
               </span>
-            </span>
+              <span className="text-muted-foreground text-xs">Externo</span>
+            </div>
           );
         }
         if (t.destino_desconocido) {
@@ -97,11 +107,6 @@ export function makeColumns(options: {
         }
         return <span className="text-muted-foreground">—</span>;
       },
-    },
-    {
-      id: "zona",
-      header: "Zona",
-      cell: ({ row }) => row.original.zona.nombre,
     },
     {
       id: "materiales",
