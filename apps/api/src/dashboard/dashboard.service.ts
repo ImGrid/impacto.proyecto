@@ -80,7 +80,6 @@ export class DashboardService {
       transMesPrev,
       transSeisMeses,
       pendientesPago,
-      pendientesVerif,
       pendientesPrecio,
     ] = await Promise.all([
       // Material recolectado del mes actual. Volumen (kg/CO₂) cuenta todo
@@ -125,10 +124,6 @@ export class DashboardService {
         },
         select: { id: true, monto_total: true },
       }),
-      // Entregas RECOLECTADO: esperando que el acopiador verifique.
-      this.prisma.transaccion.count({
-        where: { ...scope, estado: 'RECOLECTADO' },
-      }),
       // Recolecciones registradas sin precio (monto 0): cuentan en volumen
       // pero todavía no aportan a los Bs. Es la tarea pendiente "ponerles
       // precio" que se muestra como indicador.
@@ -161,7 +156,6 @@ export class DashboardService {
           (s, t) => s + Number(t.monto_total),
           0,
         ),
-        pendientes_verificacion_count: pendientesVerif,
         pendientes_precio_count: pendientesPrecio,
       },
       evolucion_mensual: this.evolucionMensual(transSeisMeses, now),

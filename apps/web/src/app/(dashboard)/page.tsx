@@ -88,9 +88,6 @@ export default function DashboardPage() {
         <AlertasCard
           pendientes_pago_count={data.alertas.pendientes_pago_count}
           pendientes_pago_monto={data.alertas.pendientes_pago_monto}
-          pendientes_verificacion_count={
-            data.alertas.pendientes_verificacion_count
-          }
           pendientes_precio_count={data.alertas.pendientes_precio_count}
         />
       )}

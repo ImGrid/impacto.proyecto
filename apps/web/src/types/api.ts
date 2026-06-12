@@ -515,7 +515,6 @@ export type DashboardData = {
   alertas: {
     pendientes_pago_count: number;
     pendientes_pago_monto: number;
-    pendientes_verificacion_count: number;
     // Recolecciones registradas sin precio (monto 0): cuentan en volumen
     // (kg/CO₂) pero aún no aportan a los Bs. Tarea pendiente: ponerles precio.
     pendientes_precio_count: number;

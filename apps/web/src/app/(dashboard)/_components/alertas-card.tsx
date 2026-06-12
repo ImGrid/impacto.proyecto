@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Clock, CreditCard, CheckCircle2, Coins } from "lucide-react";
+import { ArrowRight, CreditCard, CheckCircle2, Coins } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -12,8 +12,8 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * Alertas operacionales: entregas sin pagar y entregas esperando
- * verificación del acopiador. Son lo "accionable" del dashboard.
+ * Alertas operacionales: entregas sin pagar y recolecciones sin precio
+ * (cuentan en volumen pero aún no en Bs). Son lo "accionable" del dashboard.
  *
  * Si no hay alertas, mostramos un estado positivo ("todo al día")
  * en vez de ocultar el bloque — el admin ve rápido que no hay fuego.
@@ -21,7 +21,6 @@ import { cn } from "@/lib/utils";
 interface AlertasCardProps {
   pendientes_pago_count: number;
   pendientes_pago_monto: number;
-  pendientes_verificacion_count: number;
   pendientes_precio_count: number;
 }
 
@@ -35,13 +34,10 @@ function formatBs(n: number) {
 export function AlertasCard({
   pendientes_pago_count,
   pendientes_pago_monto,
-  pendientes_verificacion_count,
   pendientes_precio_count,
 }: AlertasCardProps) {
   const todoAlDia =
-    pendientes_pago_count === 0 &&
-    pendientes_verificacion_count === 0 &&
-    pendientes_precio_count === 0;
+    pendientes_pago_count === 0 && pendientes_precio_count === 0;
 
   return (
     <Card>
@@ -69,17 +65,6 @@ export function AlertasCard({
               detail={`${formatBs(pendientes_pago_monto)} Bs pendientes`}
               href="/pagos"
               linkLabel="Ir a pagos"
-            />
-            <AlertaFila
-              icon={<Clock className="h-5 w-5" />}
-              color="sky"
-              visible={pendientes_verificacion_count > 0}
-              label={`${pendientes_verificacion_count} ${
-                pendientes_verificacion_count === 1 ? "entrega" : "entregas"
-              } esperando verificación`}
-              detail="El acopiador aún no las ha completado"
-              href="/transacciones?estado=RECOLECTADO"
-              linkLabel="Ver"
             />
             <AlertaFila
               icon={<Coins className="h-5 w-5" />}
