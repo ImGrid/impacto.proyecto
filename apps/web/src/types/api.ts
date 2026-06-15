@@ -54,8 +54,7 @@ export type Material = {
   factor_co2: number | null;
   activo: boolean;
   fecha_creacion: string;
-  // El catálogo de materiales es por departamento (cada depto tiene su lista).
-  departamento_id: number;
+  // El catálogo de materiales es global (la misma lista para todos los departamentos).
 };
 
 export type EstadoPrecio = "VIGENTE" | "POR_VENCER" | "VENCIDO";

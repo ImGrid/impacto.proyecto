@@ -20,10 +20,7 @@ type EstadoPrecio = 'VIGENTE' | 'POR_VENCER' | 'VENCIDO';
 export class PreciosMaterialService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(
-    dto: CreatePrecioMaterialDto,
-    departamentoActivo: number | null,
-  ) {
+  async create(dto: CreatePrecioMaterialDto) {
     // Validar que precio_maximo >= precio_minimo
     if (dto.precio_maximo < dto.precio_minimo) {
       throw new BadRequestException(
@@ -56,16 +53,6 @@ export class PreciosMaterialService {
     });
     if (!material) {
       throw new NotFoundException('Material no encontrado');
-    }
-    // El material debe pertenecer al departamento activo: cada departamento
-    // fija los precios de sus propios materiales.
-    if (
-      departamentoActivo != null &&
-      material.departamento_id !== departamentoActivo
-    ) {
-      throw new BadRequestException(
-        'El material no pertenece al departamento activo de la sesión',
-      );
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -111,10 +98,7 @@ export class PreciosMaterialService {
     });
   }
 
-  async findAll(
-    query: PrecioMaterialQueryDto,
-    departamentoActivo: number | null,
-  ) {
+  async findAll(query: PrecioMaterialQueryDto) {
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
 
@@ -125,17 +109,13 @@ export class PreciosMaterialService {
       where.material_id = query.material_id;
     }
 
-    // Filtro por la relación material: búsqueda por nombre y/o departamento
-    // activo (los precios se ven por departamento, igual que sus materiales).
+    // Filtro por la relación material: búsqueda por nombre.
     const materialWhere: Prisma.materialWhereInput = {};
     if (query.search) {
       materialWhere.nombre = {
         contains: query.search,
         mode: 'insensitive' as const,
       };
-    }
-    if (departamentoActivo != null) {
-      materialWhere.departamento_id = departamentoActivo;
     }
     if (Object.keys(materialWhere).length > 0) {
       where.material = materialWhere;
@@ -181,7 +161,7 @@ export class PreciosMaterialService {
     );
   }
 
-  async findOne(id: number, departamentoActivo: number | null) {
+  async findOne(id: number) {
     const precio = await this.prisma.precio_material.findUnique({
       where: { id },
       include: {
@@ -190,20 +170,11 @@ export class PreciosMaterialService {
             id: true,
             nombre: true,
             unidad_medida_default: true,
-            departamento_id: true,
           },
         },
       },
     });
     if (!precio) {
-      throw new NotFoundException('Precio de material no encontrado');
-    }
-    // Scope por departamento activo: un precio de un material de otro
-    // departamento no existe desde la vista del caller.
-    if (
-      departamentoActivo != null &&
-      precio.material.departamento_id !== departamentoActivo
-    ) {
       throw new NotFoundException('Precio de material no encontrado');
     }
     return {
@@ -212,12 +183,8 @@ export class PreciosMaterialService {
     };
   }
 
-  async update(
-    id: number,
-    dto: UpdatePrecioMaterialDto,
-    departamentoActivo: number | null,
-  ) {
-    const precio = await this.findOne(id, departamentoActivo);
+  async update(id: number, dto: UpdatePrecioMaterialDto) {
+    const precio = await this.findOne(id);
 
     // Solo se pueden editar precios vigentes
     if (precio.estado === 'VENCIDO') {
@@ -272,8 +239,8 @@ export class PreciosMaterialService {
     };
   }
 
-  async hardDelete(id: number, departamentoActivo: number | null) {
-    const precio = await this.findOne(id, departamentoActivo);
+  async hardDelete(id: number) {
+    const precio = await this.findOne(id);
 
     // No se pueden eliminar precios vencidos (son historial)
     if (precio.estado === 'VENCIDO') {

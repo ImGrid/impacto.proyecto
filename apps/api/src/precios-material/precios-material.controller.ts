@@ -12,7 +12,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
-import { CurrentUser, Roles } from '../auth/decorators';
+import { Roles } from '../auth/decorators';
 import { PreciosMaterialService } from './precios-material.service';
 import {
   CreatePrecioMaterialDto,
@@ -28,46 +28,33 @@ export class PreciosMaterialController {
   ) {}
 
   @Post()
-  create(
-    @Body() dto: CreatePrecioMaterialDto,
-    @CurrentUser('departamento_activo') departamentoActivo: number | null,
-  ) {
-    return this.preciosMaterialService.create(dto, departamentoActivo);
+  create(@Body() dto: CreatePrecioMaterialDto) {
+    return this.preciosMaterialService.create(dto);
   }
 
   @Get()
   @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
-  findAll(
-    @Query() query: PrecioMaterialQueryDto,
-    @CurrentUser('departamento_activo') departamentoActivo: number | null,
-  ) {
-    return this.preciosMaterialService.findAll(query, departamentoActivo);
+  findAll(@Query() query: PrecioMaterialQueryDto) {
+    return this.preciosMaterialService.findAll(query);
   }
 
   @Get(':id')
   @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
-  findOne(
-    @Param('id', ParseIntPipe) id: number,
-    @CurrentUser('departamento_activo') departamentoActivo: number | null,
-  ) {
-    return this.preciosMaterialService.findOne(id, departamentoActivo);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.preciosMaterialService.findOne(id);
   }
 
   @Patch(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePrecioMaterialDto,
-    @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
-    return this.preciosMaterialService.update(id, dto, departamentoActivo);
+    return this.preciosMaterialService.update(id, dto);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(
-    @Param('id', ParseIntPipe) id: number,
-    @CurrentUser('departamento_activo') departamentoActivo: number | null,
-  ) {
-    return this.preciosMaterialService.hardDelete(id, departamentoActivo);
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.preciosMaterialService.hardDelete(id);
   }
 }

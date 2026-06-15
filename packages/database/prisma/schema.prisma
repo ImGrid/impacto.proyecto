@@ -128,21 +128,16 @@ model historial_qr {
 
 model material {
   id                    Int                   @id @default(autoincrement())
-  nombre                String                @db.VarChar(100)
+  nombre                String                @unique(map: "uq_material_nombre") @db.VarChar(100)
   descripcion           String?
   unidad_medida_default unidad_medida         @default(KG)
   factor_co2            Decimal?              @db.Decimal(10, 4)
   activo                Boolean               @default(true)
   fecha_creacion        DateTime              @default(now()) @db.Timestamp(6)
-  departamento_id       Int
   detalle_transaccion   detalle_transaccion[]
-  departamento          departamento          @relation(fields: [departamento_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   precio_material       precio_material[]
   recolector_material   recolector_material[]
   sucursal_material     sucursal_material[]
-
-  @@unique([departamento_id, nombre], map: "uq_material_departamento_nombre")
-  @@index([departamento_id], map: "idx_material_departamento")
 }
 
 model notificacion {
@@ -523,7 +518,6 @@ model departamento {
   administrador      administrador[]
   centro_operacional centro_operacional[]
   ciudad             ciudad[]
-  material           material[]
   recolector         recolector[]
   sucursal           sucursal[]
 }
