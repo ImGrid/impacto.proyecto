@@ -134,11 +134,13 @@ export type ReporteRecolectorasFiltros = {
   genero?: "HOMBRE" | "MUJER";
   edad_min?: number;
   edad_max?: number;
-  zona_id?: number;
-  asociacion_id?: number;
+  zona_id?: number[];
+  asociacion_id?: number[];
   trabaja_individual?: boolean;
-  material_habitual?: number;
-  material_recolectado?: number;
+  material_habitual?: number[];
+  material_recolectado?: number[];
+  /** IDs específicos (para exportar las seleccionadas en la tabla). */
+  ids?: number[];
   solo_activas?: boolean;
 };
 

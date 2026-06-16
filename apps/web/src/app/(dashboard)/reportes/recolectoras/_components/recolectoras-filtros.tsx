@@ -13,13 +13,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { MultiSelect, type MultiOption } from "@/components/shared/multi-select";
 import { useZonas } from "@/hooks/use-zonas";
 import { useAsociaciones } from "@/hooks/use-asociaciones";
 import { useMateriales } from "@/hooks/use-materiales";
@@ -34,6 +28,9 @@ function parse(s?: string): Date | undefined {
 function fmtD(d?: Date): string | undefined {
   return d ? format(d, "yyyy-MM-dd") : undefined;
 }
+const toStr = (a?: number[]) => (a ?? []).map(String);
+const toNum = (a: string[]): number[] | undefined =>
+  a.length ? a.map(Number) : undefined;
 
 type Props = {
   value: ReporteRecolectorasFiltros;
@@ -56,124 +53,177 @@ export function RecolectorasFiltros({ value, onChange }: Props) {
   const desde = parse(value.desde);
   const hasta = parse(value.hasta);
 
+  const zonaOpts: MultiOption[] = (zonas?.data ?? []).map((z) => ({
+    value: String(z.id),
+    label: z.nombre,
+  }));
+  const asocOpts: MultiOption[] = (asociaciones?.data ?? []).map((a) => ({
+    value: String(a.id),
+    label: a.nombre,
+  }));
+  const matOpts: MultiOption[] = (materiales?.data ?? []).map((m) => ({
+    value: String(m.id),
+    label: m.nombre,
+  }));
+
+  // Cuántos filtros secundarios (los de "Más filtros") están activos.
   const secundarios = [
     value.genero,
     value.edad_min,
     value.edad_max,
     value.trabaja_individual,
-    value.material_recolectado,
-    value.material_habitual,
     value.solo_activas ? true : undefined,
   ].filter((v) => v != null).length;
 
-  const tieneFiltros = Object.values(value).some((v) => v != null && v !== "");
+  const tieneFiltros = Object.values(value).some(
+    (v) => v != null && v !== "" && !(Array.isArray(v) && v.length === 0),
+  );
+
+  // Chips de "filtros aplicados" para los multi-selects (reconocer, no recordar).
+  const chips: { key: string; label: string; remove: () => void }[] = [];
+  const pushChips = (
+    ids: number[] | undefined,
+    opts: MultiOption[],
+    field: "zona_id" | "asociacion_id" | "material_habitual" | "material_recolectado",
+    prefijo: string,
+  ) => {
+    for (const id of ids ?? []) {
+      const lbl = opts.find((o) => o.value === String(id))?.label ?? `#${id}`;
+      chips.push({
+        key: `${field}-${id}`,
+        label: `${prefijo}: ${lbl}`,
+        remove: () =>
+          patch({ [field]: (ids ?? []).filter((x) => x !== id) } as Partial<ReporteRecolectorasFiltros>),
+      });
+    }
+  };
+  pushChips(value.zona_id, zonaOpts, "zona_id", "Zona");
+  pushChips(value.asociacion_id, asocOpts, "asociacion_id", "Asoc.");
+  pushChips(value.material_habitual, matOpts, "material_habitual", "Recoge");
+  pushChips(value.material_recolectado, matOpts, "material_recolectado", "Recolectó");
 
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded-md border bg-card p-3">
-      {/* Buscar por nombre */}
-      <div className="flex flex-col gap-1">
-        <label className="text-muted-foreground text-xs font-medium">Nombre</label>
-        <div className="relative">
-          <Search className="text-muted-foreground absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
-          <Input
-            value={value.search ?? ""}
-            onChange={(e) => patch({ search: e.target.value || undefined })}
-            placeholder="Buscar recolectora…"
-            className="h-8 w-[180px] pl-8"
-          />
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-end gap-3 rounded-md border bg-card p-3">
+        {/* Buscar por nombre */}
+        <div className="flex flex-col gap-1">
+          <label className="text-muted-foreground text-xs font-medium">Nombre</label>
+          <div className="relative">
+            <Search className="text-muted-foreground absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
+            <Input
+              value={value.search ?? ""}
+              onChange={(e) => patch({ search: e.target.value || undefined })}
+              placeholder="Buscar recolectora…"
+              className="h-8 w-[180px] pl-8"
+            />
+          </div>
         </div>
-      </div>
 
-      {/* Desde / Hasta */}
-      <DatePick label="Desde" date={desde} onSelect={(d) => patch({ desde: fmtD(d) })} max={hasta ?? new Date()} />
-      <DatePick label="Hasta" date={hasta} onSelect={(d) => patch({ hasta: fmtD(d) })} min={desde} max={new Date()} />
+        <DatePick label="Desde" date={desde} onSelect={(d) => patch({ desde: fmtD(d) })} max={hasta ?? new Date()} />
+        <DatePick label="Hasta" date={hasta} onSelect={(d) => patch({ hasta: fmtD(d) })} min={desde} max={new Date()} />
 
-      {/* Zona */}
-      <SelectFiltro
-        label="Zona"
-        value={value.zona_id}
-        placeholderAll="Todas las zonas"
-        options={(zonas?.data ?? []).map((z) => ({ value: z.id, label: z.nombre }))}
-        onChange={(v) => patch({ zona_id: v })}
-      />
+        <Campo label="Zona">
+          <MultiSelect
+            options={zonaOpts}
+            value={toStr(value.zona_id)}
+            onChange={(v) => patch({ zona_id: toNum(v) })}
+            placeholder="Todas"
+            noun={{ one: "zona", many: "zonas" }}
+            className="h-8 w-[170px]"
+          />
+        </Campo>
 
-      {/* Asociación */}
-      <SelectFiltro
-        label="Asociación"
-        value={value.asociacion_id}
-        placeholderAll="Todas las asociaciones"
-        options={(asociaciones?.data ?? []).map((a) => ({ value: a.id, label: a.nombre }))}
-        onChange={(v) => patch({ asociacion_id: v })}
-      />
+        <Campo label="Asociación">
+          <MultiSelect
+            options={asocOpts}
+            value={toStr(value.asociacion_id)}
+            onChange={(v) => patch({ asociacion_id: toNum(v) })}
+            placeholder="Todas"
+            noun={{ one: "asociación", many: "asociaciones" }}
+            className="h-8 w-[180px]"
+          />
+        </Campo>
 
-      {/* Más filtros */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline" size="sm">
-            <SlidersHorizontal className="mr-2 h-3.5 w-3.5" />
-            Más filtros
-            {secundarios > 0 && (
-              <Badge variant="secondary" className="ml-1.5">
-                {secundarios}
-              </Badge>
-            )}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[280px] space-y-3" align="start">
-          {/* Género */}
-          <div className="flex flex-col gap-1">
-            <label className="text-muted-foreground text-xs font-medium">Género</label>
-            <Select
+        <Campo label="Recoge normalmente">
+          <MultiSelect
+            options={matOpts}
+            value={toStr(value.material_habitual)}
+            onChange={(v) => patch({ material_habitual: toNum(v) })}
+            placeholder="Cualquiera"
+            noun={{ one: "material", many: "materiales" }}
+            className="h-8 w-[180px]"
+          />
+        </Campo>
+
+        <Campo label="Recolectó (real)">
+          <MultiSelect
+            options={matOpts}
+            value={toStr(value.material_recolectado)}
+            onChange={(v) => patch({ material_recolectado: toNum(v) })}
+            placeholder="Cualquiera"
+            noun={{ one: "material", many: "materiales" }}
+            className="h-8 w-[180px]"
+          />
+        </Campo>
+
+        {/* Más filtros: SOLO controles simples (sin dropdowns anidados). */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm">
+              <SlidersHorizontal className="mr-2 h-3.5 w-3.5" />
+              Más filtros
+              {secundarios > 0 && (
+                <Badge variant="secondary" className="ml-1.5">
+                  {secundarios}
+                </Badge>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[280px] space-y-3" align="start">
+            <Segmented
+              label="Género"
               value={value.genero ?? "all"}
-              onValueChange={(v) =>
+              options={[
+                { v: "all", l: "Todos" },
+                { v: "MUJER", l: "Mujer" },
+                { v: "HOMBRE", l: "Hombre" },
+              ]}
+              onChange={(v) =>
                 patch({ genero: v === "all" ? undefined : (v as "HOMBRE" | "MUJER") })
               }
-            >
-              <SelectTrigger size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="MUJER">Mujer</SelectItem>
-                <SelectItem value="HOMBRE">Hombre</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            />
 
-          {/* Edad */}
-          <div className="flex flex-col gap-1">
-            <label className="text-muted-foreground text-xs font-medium">Edad (años)</label>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                min={0}
-                max={120}
-                value={value.edad_min ?? ""}
-                onChange={(e) =>
-                  patch({ edad_min: e.target.value ? Number(e.target.value) : undefined })
-                }
-                placeholder="Mín"
-                className="h-8"
-              />
-              <span className="text-muted-foreground text-xs">a</span>
-              <Input
-                type="number"
-                min={0}
-                max={120}
-                value={value.edad_max ?? ""}
-                onChange={(e) =>
-                  patch({ edad_max: e.target.value ? Number(e.target.value) : undefined })
-                }
-                placeholder="Máx"
-                className="h-8"
-              />
+            <div className="flex flex-col gap-1">
+              <span className="text-muted-foreground text-xs font-medium">Edad (años)</span>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={120}
+                  value={value.edad_min ?? ""}
+                  onChange={(e) =>
+                    patch({ edad_min: e.target.value ? Number(e.target.value) : undefined })
+                  }
+                  placeholder="Mín"
+                  className="h-8"
+                />
+                <span className="text-muted-foreground text-xs">a</span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={120}
+                  value={value.edad_max ?? ""}
+                  onChange={(e) =>
+                    patch({ edad_max: e.target.value ? Number(e.target.value) : undefined })
+                  }
+                  placeholder="Máx"
+                  className="h-8"
+                />
+              </div>
             </div>
-          </div>
 
-          {/* Individual / grupo */}
-          <div className="flex flex-col gap-1">
-            <label className="text-muted-foreground text-xs font-medium">Modalidad</label>
-            <Select
+            <Segmented
+              label="Modalidad"
               value={
                 value.trabaja_individual === undefined
                   ? "all"
@@ -181,100 +231,99 @@ export function RecolectorasFiltros({ value, onChange }: Props) {
                     ? "ind"
                     : "grupo"
               }
-              onValueChange={(v) =>
-                patch({
-                  trabaja_individual: v === "all" ? undefined : v === "ind",
-                })
+              options={[
+                { v: "all", l: "Todas" },
+                { v: "ind", l: "Individual" },
+                { v: "grupo", l: "En grupo" },
+              ]}
+              onChange={(v) =>
+                patch({ trabaja_individual: v === "all" ? undefined : v === "ind" })
               }
-            >
-              <SelectTrigger size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="ind">Individual</SelectItem>
-                <SelectItem value="grupo">En grupo/asociación</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            />
 
-          {/* Material recolectado (real) */}
-          <div className="flex flex-col gap-1">
-            <label className="text-muted-foreground text-xs font-medium">
-              Recolectó (real, en el período)
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={!!value.solo_activas}
+                onChange={(e) => patch({ solo_activas: e.target.checked ? true : undefined })}
+              />
+              Solo con entregas en el período
             </label>
-            <Select
-              value={value.material_recolectado != null ? String(value.material_recolectado) : "all"}
-              onValueChange={(v) =>
-                patch({ material_recolectado: v === "all" ? undefined : Number(v) })
-              }
-            >
-              <SelectTrigger size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Cualquier material</SelectItem>
-                {(materiales?.data ?? []).map((m) => (
-                  <SelectItem key={m.id} value={String(m.id)}>
-                    {m.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          </PopoverContent>
+        </Popover>
 
-          {/* Material habitual (declarado) */}
-          <div className="flex flex-col gap-1">
-            <label className="text-muted-foreground text-xs font-medium">
-              Recoge normalmente (declarado)
-            </label>
-            <Select
-              value={value.material_habitual != null ? String(value.material_habitual) : "all"}
-              onValueChange={(v) =>
-                patch({ material_habitual: v === "all" ? undefined : Number(v) })
-              }
-            >
-              <SelectTrigger size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Cualquier material</SelectItem>
-                {(materiales?.data ?? []).map((m) => (
-                  <SelectItem key={m.id} value={String(m.id)}>
-                    {m.nombre}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        {tieneFiltros && (
+          <Button variant="ghost" size="sm" onClick={() => onChange({})}>
+            <X className="mr-1 h-3.5 w-3.5" />
+            Limpiar
+          </Button>
+        )}
+      </div>
 
-          {/* Solo activas */}
-          <div className="flex flex-col gap-1">
-            <label className="text-muted-foreground text-xs font-medium">Actividad</label>
-            <Select
-              value={value.solo_activas ? "activas" : "all"}
-              onValueChange={(v) =>
-                patch({ solo_activas: v === "activas" ? true : undefined })
-              }
-            >
-              <SelectTrigger size="sm" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="activas">Solo con entregas</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      {tieneFiltros && (
-        <Button variant="ghost" size="sm" onClick={() => onChange({})}>
-          <X className="mr-1 h-3.5 w-3.5" />
-          Limpiar
-        </Button>
+      {/* Resumen de filtros aplicados (chips removibles). */}
+      {chips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-1">
+          <span className="text-muted-foreground text-xs">Aplicados:</span>
+          {chips.map((c) => (
+            <Badge key={c.key} variant="secondary" className="gap-1 pr-1 font-normal">
+              {c.label}
+              <button
+                type="button"
+                onClick={c.remove}
+                className="hover:bg-background/60 ml-0.5 rounded-full p-0.5"
+                aria-label={`Quitar ${c.label}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
       )}
+    </div>
+  );
+}
+
+function Campo({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-muted-foreground text-xs font-medium">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function Segmented({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { v: string; l: string }[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-muted-foreground text-xs font-medium">{label}</span>
+      <div className="bg-muted inline-flex rounded-md p-0.5">
+        {options.map((o) => (
+          <button
+            key={o.v}
+            type="button"
+            onClick={() => onChange(o.v)}
+            className={cn(
+              "flex-1 rounded-sm px-2 py-1 text-xs font-medium transition-colors",
+              value === o.v
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {o.l}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -320,42 +369,6 @@ function DatePick({
           />
         </PopoverContent>
       </Popover>
-    </div>
-  );
-}
-
-function SelectFiltro({
-  label,
-  value,
-  placeholderAll,
-  options,
-  onChange,
-}: {
-  label: string;
-  value?: number;
-  placeholderAll: string;
-  options: { value: number; label: string }[];
-  onChange: (v: number | undefined) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-muted-foreground text-xs font-medium">{label}</label>
-      <Select
-        value={value != null ? String(value) : "all"}
-        onValueChange={(v) => onChange(v === "all" ? undefined : Number(v))}
-      >
-        <SelectTrigger size="sm" className="w-[170px]">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">{placeholderAll}</SelectItem>
-          {options.map((o) => (
-            <SelectItem key={o.value} value={String(o.value)}>
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
     </div>
   );
 }

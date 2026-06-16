@@ -1,7 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { Recycle, Wallet, Leaf, Users, UserCheck } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  Recycle,
+  Wallet,
+  Leaf,
+  Users,
+  UserCheck,
+  FileSpreadsheet,
+  FileText,
+  X,
+} from "lucide-react";
 import {
   Table,
   TableBody,
@@ -10,6 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useReporte } from "@/hooks/use-reportes";
 import type {
   ReporteRecolectorasLista,
@@ -17,6 +28,7 @@ import type {
 } from "@/types/reportes";
 import { ReporteShell } from "../_components/reporte-shell";
 import { ReporteResumen } from "../_components/reporte-resumen";
+import { reporteParams } from "../_components/query";
 import { fmt } from "../_components/format";
 import { RecolectorasFiltros } from "./_components/recolectoras-filtros";
 import { RecolectoraDetalleDialog } from "./_components/recolectora-detalle-dialog";
@@ -38,12 +50,47 @@ export default function RecolectorasPage() {
     setOpen(true);
   };
 
-  const items = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data]);
+
+  // Selección a mano de recolectoras específicas (para exportarlas).
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const idsPagina = items.map((r) => r.id);
+  const todasMarcadas = idsPagina.length > 0 && idsPagina.every((id) => sel.has(id));
+
+  const toggle = (id: number) =>
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleTodas = () =>
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (todasMarcadas) idsPagina.forEach((id) => next.delete(id));
+      else idsPagina.forEach((id) => next.add(id));
+      return next;
+    });
+
+  function exportarSeleccionadas(formato: "excel" | "pdf") {
+    if (sel.size === 0) return;
+    const params = reporteParams({
+      desde: filtros.desde,
+      hasta: filtros.hasta,
+      ids: [...sel],
+    });
+    params.set("formato", formato);
+    const a = document.createElement("a");
+    a.href = `/api/reportes/recolectoras/export?${params.toString()}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
 
   return (
     <ReporteShell
       title="Recolectoras"
-      description="Filtra por edad, género, asociación, zona o material, y haz clic en una recolectora para ver su perfil declarado y su actividad real."
+      description="Filtra por edad, género, asociación, zona o material (puedes elegir varios), o marca recolectoras específicas para exportarlas."
       exportar={{ endpoint: "recolectoras", filtros }}
     >
       <RecolectorasFiltros value={filtros} onChange={setFiltros} />
@@ -59,10 +106,43 @@ export default function RecolectorasPage() {
         ]}
       />
 
+      {/* Barra contextual de selección (aparece al marcar filas). */}
+      {sel.size > 0 && (
+        <div className="bg-primary/5 border-primary/20 flex flex-wrap items-center gap-3 rounded-md border px-3 py-2">
+          <span className="text-sm font-medium">
+            {sel.size} recolectora{sel.size === 1 ? "" : "s"} seleccionada
+            {sel.size === 1 ? "" : "s"}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => exportarSeleccionadas("excel")}>
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              Exportar Excel
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => exportarSeleccionadas("pdf")}>
+              <FileText className="mr-2 h-4 w-4" />
+              Exportar PDF
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSel(new Set())}>
+              <X className="mr-1 h-3.5 w-3.5" />
+              Quitar
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 align-middle"
+                  checked={todasMarcadas}
+                  onChange={toggleTodas}
+                  aria-label="Seleccionar todas las de la página"
+                />
+              </TableHead>
               <TableHead>Recolectora</TableHead>
               <TableHead className="text-right">Edad</TableHead>
               <TableHead>Género</TableHead>
@@ -77,7 +157,7 @@ export default function RecolectorasPage() {
             {items.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={9}
                   className="text-muted-foreground py-10 text-center text-sm"
                 >
                   No hay recolectoras que cumplan los filtros.
@@ -85,7 +165,16 @@ export default function RecolectorasPage() {
               </TableRow>
             ) : (
               items.map((r) => (
-                <TableRow key={r.id}>
+                <TableRow key={r.id} className={cn(sel.has(r.id) && "bg-primary/5")}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 align-middle"
+                      checked={sel.has(r.id)}
+                      onChange={() => toggle(r.id)}
+                      aria-label={`Seleccionar ${r.nombre}`}
+                    />
+                  </TableCell>
                   <TableCell>
                     <button
                       type="button"

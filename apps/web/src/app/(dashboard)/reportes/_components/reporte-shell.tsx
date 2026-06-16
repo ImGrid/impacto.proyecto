@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft, FileSpreadsheet, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { reporteParams } from "./query";
 
 /**
  * Envoltura común de la página de un reporte: enlace de vuelta a /reportes,
@@ -24,10 +25,7 @@ export function ReporteShell({
 }) {
   function descargar(formato: "excel" | "pdf") {
     if (!exportar) return;
-    const params = new URLSearchParams();
-    for (const [k, v] of Object.entries(exportar.filtros)) {
-      if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
-    }
+    const params = reporteParams(exportar.filtros);
     params.set("formato", formato);
     const a = document.createElement("a");
     a.href = `/api/reportes/${exportar.endpoint}/export?${params.toString()}`;

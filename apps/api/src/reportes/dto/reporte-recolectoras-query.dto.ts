@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -10,7 +11,7 @@ import {
   Min,
 } from 'class-validator';
 import { genero } from '@prisma/client';
-import { toBoolean } from '../../common/helpers';
+import { toBoolean, toNumberArray } from '../../common/helpers';
 
 /**
  * Filtros del reporte DINÁMICO de recolectoras. Pensados para el usuario no
@@ -49,32 +50,48 @@ export class ReporteRecolectorasQueryDto {
   @Max(120)
   edad_max?: number;
 
+  /** Una o varias zonas (multi-select). `?zona_id=1&zona_id=2`. */
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  zona_id?: number;
+  @Transform(toNumberArray)
+  @IsArray()
+  @IsInt({ each: true })
+  zona_id?: number[];
 
+  /** Una o varias asociaciones (multi-select). */
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  asociacion_id?: number;
+  @Transform(toNumberArray)
+  @IsArray()
+  @IsInt({ each: true })
+  asociacion_id?: number[];
 
   @IsOptional()
   @Transform(toBoolean)
   @IsBoolean()
   trabaja_individual?: boolean;
 
-  /** Material que recoge NORMALMENTE (declarado, recolector_material). */
+  /** Material(es) que recoge NORMALMENTE (declarado, recolector_material). */
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  material_habitual?: number;
+  @Transform(toNumberArray)
+  @IsArray()
+  @IsInt({ each: true })
+  material_habitual?: number[];
 
-  /** Material que recolectó DE VERDAD en el período (transacciones). */
+  /** Material(es) que recolectó DE VERDAD en el período (transacciones). */
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  material_recolectado?: number;
+  @Transform(toNumberArray)
+  @IsArray()
+  @IsInt({ each: true })
+  material_recolectado?: number[];
+
+  /**
+   * IDs de recolectoras específicas (para "Exportar seleccionadas"): limita el
+   * reporte exactamente a estas personas, sin importar atributos compartidos.
+   */
+  @IsOptional()
+  @Transform(toNumberArray)
+  @IsArray()
+  @IsInt({ each: true })
+  ids?: number[];
 
   /** Solo recolectoras con al menos una entrega en el período. */
   @IsOptional()

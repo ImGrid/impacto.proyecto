@@ -154,6 +154,13 @@ export class ReportesService {
   async porAsociacion(query: ReporteQueryDto, depto: number | null) {
     const { desde, hasta } = this.rango(query);
     const scope = this.scopeRecolector(depto);
+    // Filtro multi-asociación ('Sin asociación' = bucket id 0).
+    const filtroItems = query.asociacion_id?.length
+      ? Prisma.sql`AND COALESCE(a.id, 0) IN (${Prisma.join(query.asociacion_id)})`
+      : Prisma.empty;
+    const filtroTotal = query.asociacion_id?.length
+      ? Prisma.sql`AND COALESCE(r.asociacion_id, 0) IN (${Prisma.join(query.asociacion_id)})`
+      : Prisma.empty;
     const items = await this.prisma.$queryRaw<FilaAsociacion[]>(Prisma.sql`
       WITH ${this.txVolumenCte}
       SELECT
@@ -168,17 +175,26 @@ export class ReportesService {
       JOIN recolector r ON r.id = t.recolector_id
       LEFT JOIN asociacion a ON a.id = r.asociacion_id
       LEFT JOIN tx_volumen tv ON tv.transaccion_id = t.id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${filtroItems}
       GROUP BY COALESCE(a.id, 0), COALESCE(a.nombre, 'Sin asociación')
       ORDER BY kg DESC
     `);
-    return this.empaquetar(desde, hasta, await this.totalTx(desde, hasta, scope), items);
+    return this.empaquetar(
+      desde,
+      hasta,
+      await this.totalTx(desde, hasta, scope, filtroTotal),
+      items,
+    );
   }
 
   /** R-B4: recolección por zona/ciudad. */
   async porZona(query: ReporteQueryDto, depto: number | null) {
     const { desde, hasta } = this.rango(query);
     const scope = this.scopeRecolector(depto);
+    // Filtro multi-zona (la zona es la de la transacción: t.zona_id).
+    const filtro = query.zona_id?.length
+      ? Prisma.sql`AND t.zona_id IN (${Prisma.join(query.zona_id)})`
+      : Prisma.empty;
     const items = await this.prisma.$queryRaw<FilaZona[]>(Prisma.sql`
       WITH ${this.txVolumenCte}
       SELECT
@@ -195,26 +211,36 @@ export class ReportesService {
       JOIN zona z ON z.id = t.zona_id
       JOIN ciudad ci ON ci.id = z.ciudad_id
       LEFT JOIN tx_volumen tv ON tv.transaccion_id = t.id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${filtro}
       GROUP BY z.id, z.nombre, ci.nombre
       ORDER BY kg DESC
     `);
-    return this.empaquetar(desde, hasta, await this.totalTx(desde, hasta, scope), items);
+    return this.empaquetar(
+      desde,
+      hasta,
+      await this.totalTx(desde, hasta, scope, filtro),
+      items,
+    );
   }
 
   /** R-B9: recolección por destino (centro op / externo / desconocido). */
   async porDestino(query: ReporteQueryDto, depto: number | null) {
     const { desde, hasta } = this.rango(query);
     const scope = this.scopeRecolector(depto);
+    // Filtro por categoría de destino (polimórfico). La misma expresión CASE
+    // sirve para items y total (sólo referencia columnas de `t`).
+    const tipoExpr = Prisma.sql`CASE
+      WHEN t.centro_operacional_id IS NOT NULL THEN 'centro_op'
+      WHEN t.acopiador_externo_id IS NOT NULL THEN 'externo'
+      WHEN t.destino_desconocido THEN 'desconocido'
+      ELSE 'sin_asignar' END`;
+    const filtro = query.tipo_destino?.length
+      ? Prisma.sql`AND (${tipoExpr}) IN (${Prisma.join(query.tipo_destino)})`
+      : Prisma.empty;
     const items = await this.prisma.$queryRaw<FilaDestino[]>(Prisma.sql`
       WITH ${this.txVolumenCte}
       SELECT
-        CASE
-          WHEN t.centro_operacional_id IS NOT NULL THEN 'centro_op'
-          WHEN t.acopiador_externo_id IS NOT NULL THEN 'externo'
-          WHEN t.destino_desconocido THEN 'desconocido'
-          ELSE 'sin_asignar'
-        END AS tipo_destino,
+        (${tipoExpr}) AS tipo_destino,
         COALESCE(co.nombre_punto, ext.nombre,
           CASE WHEN t.destino_desconocido THEN 'Desconocido' ELSE 'Sin asignar' END
         ) AS destino,
@@ -227,11 +253,16 @@ export class ReportesService {
       LEFT JOIN centro_operacional co ON co.id = t.centro_operacional_id
       LEFT JOIN acopiador_comprador_externo ext ON ext.id = t.acopiador_externo_id
       LEFT JOIN tx_volumen tv ON tv.transaccion_id = t.id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${filtro}
       GROUP BY 1, 2
       ORDER BY kg DESC
     `);
-    return this.empaquetar(desde, hasta, await this.totalTx(desde, hasta, scope), items);
+    return this.empaquetar(
+      desde,
+      hasta,
+      await this.totalTx(desde, hasta, scope, filtro),
+      items,
+    );
   }
 
   // ============================================================
@@ -249,6 +280,10 @@ export class ReportesService {
     const { desde, hasta } = this.rango(query);
     const scope =
       depto != null ? Prisma.sql`AND s.departamento_id = ${depto}` : Prisma.empty;
+    // Filtro multi-generador (la sucursal apunta al generador: s.generador_id).
+    const filtro = query.generador_id?.length
+      ? Prisma.sql`AND s.generador_id IN (${Prisma.join(query.generador_id)})`
+      : Prisma.empty;
 
     const items = await this.prisma.$queryRaw<FilaGenerador[]>(Prisma.sql`
       SELECT
@@ -267,7 +302,7 @@ export class ReportesService {
       JOIN generador g ON g.id = s.generador_id
       LEFT JOIN tipo_generador tg ON tg.id = g.tipo_generador_id
       LEFT JOIN material m ON m.id = dt.material_id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${filtro}
       GROUP BY g.id, g.razon_social, tg.nombre
       ORDER BY kg DESC
     `);
@@ -295,7 +330,7 @@ export class ReportesService {
       JOIN sucursal s ON s.id = dt.sucursal_id
       JOIN generador g ON g.id = s.generador_id
       LEFT JOIN material m ON m.id = dt.material_id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${filtro}
     `);
 
     return {
@@ -318,6 +353,10 @@ export class ReportesService {
   async porMaterial(query: ReporteQueryDto, depto: number | null) {
     const { desde, hasta } = this.rango(query);
     const scope = this.scopeRecolector(depto);
+    // Filtro multi-material (a nivel línea). 'Otros' = bucket id 0.
+    const matFiltro = query.material_id?.length
+      ? Prisma.sql`AND COALESCE(m.id, 0) IN (${Prisma.join(query.material_id)})`
+      : Prisma.empty;
     const items = await this.prisma.$queryRaw<FilaMaterial[]>(Prisma.sql`
       SELECT
         COALESCE(m.id, 0)::int                AS material_id,
@@ -331,11 +370,16 @@ export class ReportesService {
       JOIN transaccion t ON t.id = dt.transaccion_id
       JOIN recolector r ON r.id = t.recolector_id
       LEFT JOIN material m ON m.id = dt.material_id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${matFiltro}
       GROUP BY COALESCE(m.id, 0), COALESCE(m.nombre, 'Otros (sin clasificar)')
       ORDER BY kg DESC
     `);
-    const total = await this.totalTx(desde, hasta, scope);
+    // Total: sin filtro usa el total tx-level (reconcilia con el global); con
+    // filtro de material, total a nivel línea acotado a esos materiales para que
+    // los KPIs y el % reflejen exactamente lo filtrado.
+    const total = query.material_id?.length
+      ? await this.totalMaterialFiltrado(desde, hasta, scope, matFiltro)
+      : await this.totalTx(desde, hasta, scope);
     return {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
       total,
@@ -355,6 +399,14 @@ export class ReportesService {
     const { desde, hasta } = this.rango(query);
     const scope =
       depto != null ? Prisma.sql`AND s.departamento_id = ${depto}` : Prisma.empty;
+    // Filtro multi-tipo. En items `tg` está disponible; en el total (que sólo
+    // une sucursal) se acota vía subconsulta sobre el generador de la sucursal.
+    const filtroItems = query.tipo_generador_id?.length
+      ? Prisma.sql`AND tg.id IN (${Prisma.join(query.tipo_generador_id)})`
+      : Prisma.empty;
+    const filtroTotal = query.tipo_generador_id?.length
+      ? Prisma.sql`AND s.generador_id IN (SELECT g2.id FROM generador g2 WHERE g2.tipo_generador_id IN (${Prisma.join(query.tipo_generador_id)}))`
+      : Prisma.empty;
     const items = await this.prisma.$queryRaw<FilaTipoGenerador[]>(Prisma.sql`
       SELECT
         tg.id::int                            AS tipo_generador_id,
@@ -371,13 +423,13 @@ export class ReportesService {
       JOIN generador g ON g.id = s.generador_id
       JOIN tipo_generador tg ON tg.id = g.tipo_generador_id
       LEFT JOIN material m ON m.id = dt.material_id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${filtroItems}
       GROUP BY tg.id, tg.nombre
       ORDER BY kg DESC
     `);
     return {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
-      total: await this.totalLineaSucursal(desde, hasta, depto),
+      total: await this.totalLineaSucursal(desde, hasta, depto, filtroTotal),
       items: items.map((i) => this.redondearObj(i)),
     };
   }
@@ -391,6 +443,27 @@ export class ReportesService {
     const { desde, hasta } = this.rango(query);
     const scope =
       depto != null ? Prisma.sql`AND s.departamento_id = ${depto}` : Prisma.empty;
+    // Filtros combinables: material (m disponible en items y total) y tipo (en
+    // items vía tg; en el total vía subconsulta sobre el generador).
+    const condItems: Prisma.Sql[] = [];
+    const condTotal: Prisma.Sql[] = [];
+    if (query.material_id?.length) {
+      const c = Prisma.sql`COALESCE(m.id, 0) IN (${Prisma.join(query.material_id)})`;
+      condItems.push(c);
+      condTotal.push(c);
+    }
+    if (query.tipo_generador_id?.length) {
+      condItems.push(Prisma.sql`tg.id IN (${Prisma.join(query.tipo_generador_id)})`);
+      condTotal.push(
+        Prisma.sql`s.generador_id IN (SELECT g2.id FROM generador g2 WHERE g2.tipo_generador_id IN (${Prisma.join(query.tipo_generador_id)}))`,
+      );
+    }
+    const filtroItems = condItems.length
+      ? Prisma.sql`AND ${Prisma.join(condItems, ' AND ')}`
+      : Prisma.empty;
+    const filtroTotal = condTotal.length
+      ? Prisma.sql`AND ${Prisma.join(condTotal, ' AND ')}`
+      : Prisma.empty;
     const items = await this.prisma.$queryRaw<FilaMatriz[]>(Prisma.sql`
       SELECT
         COALESCE(m.id, 0)::int                AS material_id,
@@ -407,13 +480,13 @@ export class ReportesService {
       JOIN generador g ON g.id = s.generador_id
       JOIN tipo_generador tg ON tg.id = g.tipo_generador_id
       LEFT JOIN material m ON m.id = dt.material_id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${filtroItems}
       GROUP BY COALESCE(m.id, 0), COALESCE(m.nombre, 'Otros (sin clasificar)'), tg.id, tg.nombre
       ORDER BY kg DESC
     `);
     return {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
-      total: await this.totalLineaSucursal(desde, hasta, depto),
+      total: await this.totalLineaSucursal(desde, hasta, depto, filtroTotal),
       items: items.map((i) => this.redondearObj(i)),
     };
   }
@@ -437,28 +510,32 @@ export class ReportesService {
 
     const cond: Prisma.Sql[] = [];
     if (depto != null) cond.push(Prisma.sql`r.departamento_id = ${depto}`);
+    // IDs explícitos (para "Exportar seleccionadas"): acota a estas personas.
+    if (query.ids?.length)
+      cond.push(Prisma.sql`r.id IN (${Prisma.join(query.ids)})`);
     if (query.genero) cond.push(Prisma.sql`r.genero::text = ${query.genero}`);
     if (query.trabaja_individual !== undefined)
       cond.push(Prisma.sql`r.trabaja_individual = ${query.trabaja_individual}`);
-    if (query.zona_id) cond.push(Prisma.sql`r.zona_id = ${query.zona_id}`);
-    if (query.asociacion_id)
-      cond.push(Prisma.sql`r.asociacion_id = ${query.asociacion_id}`);
+    if (query.zona_id?.length)
+      cond.push(Prisma.sql`r.zona_id IN (${Prisma.join(query.zona_id)})`);
+    if (query.asociacion_id?.length)
+      cond.push(Prisma.sql`r.asociacion_id IN (${Prisma.join(query.asociacion_id)})`);
     if (query.edad_min != null) cond.push(Prisma.sql`r.edad >= ${query.edad_min}`);
     if (query.edad_max != null) cond.push(Prisma.sql`r.edad <= ${query.edad_max}`);
     if (query.search)
       cond.push(Prisma.sql`r.nombre_completo ILIKE ${'%' + query.search + '%'}`);
-    if (query.material_habitual)
+    if (query.material_habitual?.length)
       cond.push(Prisma.sql`EXISTS (
         SELECT 1 FROM recolector_material rm
-        WHERE rm.recolector_id = r.id AND rm.material_id = ${query.material_habitual})`);
-    if (query.material_recolectado)
+        WHERE rm.recolector_id = r.id AND rm.material_id IN (${Prisma.join(query.material_habitual)}))`);
+    if (query.material_recolectado?.length)
       cond.push(Prisma.sql`EXISTS (
         SELECT 1 FROM transaccion t2
         JOIN detalle_transaccion dt2 ON dt2.transaccion_id = t2.id
         WHERE t2.recolector_id = r.id
           AND t2.estado IN ('RECOLECTADO','ENTREGADO','PAGADO')
           AND t2.fecha BETWEEN ${desde} AND ${hasta}
-          AND dt2.material_id = ${query.material_recolectado})`);
+          AND dt2.material_id IN (${Prisma.join(query.material_recolectado)}))`);
     if (query.solo_activas) cond.push(Prisma.sql`act.recolector_id IS NOT NULL`);
 
     const where = cond.length
@@ -651,11 +728,16 @@ export class ReportesService {
   // Helpers compartidos
   // ============================================================
 
-  /** Total a nivel transacción (recolectoras/transacciones distintas + sumas). */
+  /**
+   * Total a nivel transacción (recolectoras/transacciones distintas + sumas).
+   * `extra` permite acotar el total con el MISMO filtro de entidad que los items
+   * (condición sobre `t`/`r`), para que los KPIs reflejen lo filtrado.
+   */
   private async totalTx(
     desde: Date,
     hasta: Date,
     scope: Prisma.Sql,
+    extra: Prisma.Sql = Prisma.empty,
   ): Promise<TotalTx> {
     const [total] = await this.prisma.$queryRaw<TotalTx[]>(Prisma.sql`
       WITH ${this.txVolumenCte}
@@ -668,7 +750,37 @@ export class ReportesService {
       FROM transaccion t
       JOIN recolector r ON r.id = t.recolector_id
       LEFT JOIN tx_volumen tv ON tv.transaccion_id = t.id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${extra}
+    `);
+    return this.redondearObj(total);
+  }
+
+  /**
+   * Total del reporte por-material CUANDO hay filtro de material: agrega a nivel
+   * línea (mismos joins/scope que los items) acotando a los materiales elegidos.
+   * Así kg/bs/CO₂ = suma de los materiales filtrados y recolectoras/transacciones
+   * = distintas que recolectaron ALGUNO de esos materiales (reconcilia con la
+   * suma de los items mostrados).
+   */
+  private async totalMaterialFiltrado(
+    desde: Date,
+    hasta: Date,
+    scope: Prisma.Sql,
+    matFiltro: Prisma.Sql,
+  ): Promise<TotalTx> {
+    const [total] = await this.prisma.$queryRaw<TotalTx[]>(Prisma.sql`
+      SELECT
+        COUNT(DISTINCT t.recolector_id)::int  AS recolectoras,
+        COUNT(DISTINCT t.id)::int             AS transacciones,
+        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
+        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
+          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg,
+        COALESCE(SUM(dt.subtotal), 0)::float  AS bs
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      JOIN recolector r ON r.id = t.recolector_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${matFiltro}
     `);
     return this.redondearObj(total);
   }
@@ -682,6 +794,7 @@ export class ReportesService {
     desde: Date,
     hasta: Date,
     depto: number | null,
+    extra: Prisma.Sql = Prisma.empty,
   ): Promise<TotalLinea> {
     const scope =
       depto != null ? Prisma.sql`AND s.departamento_id = ${depto}` : Prisma.empty;
@@ -696,7 +809,7 @@ export class ReportesService {
       JOIN transaccion t ON t.id = dt.transaccion_id
       JOIN sucursal s ON s.id = dt.sucursal_id
       LEFT JOIN material m ON m.id = dt.material_id
-      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${extra}
     `);
     return this.redondearObj(total);
   }

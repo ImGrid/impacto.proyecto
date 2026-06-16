@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Recycle, Wallet, Leaf, Building2, Store } from "lucide-react";
 import { useReporte } from "@/hooks/use-reportes";
 import type { ReportePorGenerador } from "@/types/reportes";
+import { type MultiOption } from "@/components/shared/multi-select";
+import { useGeneradores } from "@/hooks/use-generadores";
 import { ReporteShell } from "../_components/reporte-shell";
 import {
   ReportePeriodoFiltro,
@@ -11,7 +13,10 @@ import {
 } from "../_components/reporte-periodo-filtro";
 import { ReporteResumen } from "../_components/reporte-resumen";
 import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
+import { ReporteFiltroExtra } from "../_components/reporte-filtro-extra";
 import { RankingChart } from "../../estadisticas/_components/ranking-chart";
+
+type Filtros = Periodo & { generador_id?: number[] };
 
 type Fila = {
   generador_id: number;
@@ -35,11 +40,16 @@ const columnas: ReporteColumna<Fila>[] = [
 ];
 
 export default function PorGeneradorPage() {
-  const [periodo, setPeriodo] = useState<Periodo>({});
+  const [filtros, setFiltros] = useState<Filtros>({});
   const { data, isLoading } = useReporte<ReportePorGenerador>(
     "por-generador",
-    periodo,
+    filtros,
   );
+  const { data: generadores } = useGeneradores({ limit: 100, activo: true });
+  const genOpts: MultiOption[] = (generadores?.data ?? []).map((g) => ({
+    value: String(g.id),
+    label: g.razon_social,
+  }));
 
   const rows: Fila[] = (data?.items ?? []).map((g) => ({
     ...g,
@@ -49,10 +59,22 @@ export default function PorGeneradorPage() {
   return (
     <ReporteShell
       title="Cantidad por generador"
-      description="Cuánto aportó cada empresa generadora a través de sus sucursales (solo material con origen identificado)."
-      exportar={{ endpoint: "por-generador", filtros: periodo }}
+      description="Cuánto aportó cada empresa generadora a través de sus sucursales. Puedes acotar a ciertos generadores."
+      exportar={{ endpoint: "por-generador", filtros }}
     >
-      <ReportePeriodoFiltro value={periodo} onChange={setPeriodo} />
+      <ReportePeriodoFiltro
+        value={filtros}
+        onChange={(p) => setFiltros((f) => ({ ...f, ...p }))}
+      >
+        <ReporteFiltroExtra
+          label="Generador"
+          options={genOpts}
+          value={filtros.generador_id}
+          onChange={(v) => setFiltros((f) => ({ ...f, generador_id: v }))}
+          noun={{ one: "generador", many: "generadores" }}
+          width="w-[200px]"
+        />
+      </ReportePeriodoFiltro>
 
       <ReporteResumen
         loading={isLoading}

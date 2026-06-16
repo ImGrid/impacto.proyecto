@@ -36,9 +36,12 @@ function hoyStr(): string {
 export function ReportePeriodoFiltro({
   value,
   onChange,
+  children,
 }: {
   value: Periodo;
   onChange: (p: Periodo) => void;
+  /** Filtros extra (p. ej. un multi-select de material) en la misma barra. */
+  children?: React.ReactNode;
 }) {
   const desde = parse(value.desde);
   const hasta = parse(value.hasta);
@@ -60,6 +63,7 @@ export function ReportePeriodoFiltro({
         min={desde}
         max={new Date()}
       />
+      {children}
       <div className="flex flex-col gap-1">
         <span className="text-muted-foreground text-xs font-medium">Rápido</span>
         <div className="flex gap-1">

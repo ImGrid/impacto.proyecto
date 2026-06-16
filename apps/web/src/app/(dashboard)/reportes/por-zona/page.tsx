@@ -4,6 +4,9 @@ import { useState } from "react";
 import { Recycle, Wallet, Leaf, Users, MapPin } from "lucide-react";
 import { useReporte } from "@/hooks/use-reportes";
 import type { ReportePorZona } from "@/types/reportes";
+import { type MultiOption } from "@/components/shared/multi-select";
+import { useZonas } from "@/hooks/use-zonas";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import { ReporteShell } from "../_components/reporte-shell";
 import {
   ReportePeriodoFiltro,
@@ -11,9 +14,11 @@ import {
 } from "../_components/reporte-periodo-filtro";
 import { ReporteResumen } from "../_components/reporte-resumen";
 import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
+import { ReporteFiltroExtra } from "../_components/reporte-filtro-extra";
 import { RankingChart } from "../../estadisticas/_components/ranking-chart";
 
 type Fila = ReportePorZona["items"][number];
+type Filtros = Periodo & { zona_id?: number[] };
 
 const columnas: ReporteColumna<Fila>[] = [
   { key: "zona", header: "Zona", format: "text" },
@@ -26,16 +31,37 @@ const columnas: ReporteColumna<Fila>[] = [
 ];
 
 export default function PorZonaPage() {
-  const [periodo, setPeriodo] = useState<Periodo>({});
-  const { data, isLoading } = useReporte<ReportePorZona>("por-zona", periodo);
+  const [filtros, setFiltros] = useState<Filtros>({});
+  const { data, isLoading } = useReporte<ReportePorZona>("por-zona", filtros);
+  const depto = useDepartamentoActivo();
+  const { data: zonas } = useZonas({
+    limit: 100,
+    activo: true,
+    departamentoId: depto ?? undefined,
+  });
+  const zonaOpts: MultiOption[] = (zonas?.data ?? []).map((z) => ({
+    value: String(z.id),
+    label: z.nombre,
+  }));
 
   return (
     <ReporteShell
       title="Recolección por zona"
-      description="Volumen recolectado, ingresos y CO₂ por zona y ciudad en el período."
-      exportar={{ endpoint: "por-zona", filtros: periodo }}
+      description="Volumen recolectado, ingresos y CO₂ por zona y ciudad. Puedes acotar a ciertas zonas."
+      exportar={{ endpoint: "por-zona", filtros }}
     >
-      <ReportePeriodoFiltro value={periodo} onChange={setPeriodo} />
+      <ReportePeriodoFiltro
+        value={filtros}
+        onChange={(p) => setFiltros((f) => ({ ...f, ...p }))}
+      >
+        <ReporteFiltroExtra
+          label="Zona"
+          options={zonaOpts}
+          value={filtros.zona_id}
+          onChange={(v) => setFiltros((f) => ({ ...f, zona_id: v }))}
+          noun={{ one: "zona", many: "zonas" }}
+        />
+      </ReportePeriodoFiltro>
 
       <ReporteResumen
         loading={isLoading}

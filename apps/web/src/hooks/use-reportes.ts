@@ -3,13 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { clientGet } from "@/lib/client-api";
 import { useDepartamentoActivo } from "@/components/departamento-context";
+import { reporteParams } from "@/app/(dashboard)/reportes/_components/query";
 
 function buildQuery(filters: Record<string, unknown>): string {
-  const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(filters)) {
-    if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
-  }
-  const qs = params.toString();
+  const qs = reporteParams(filters).toString();
   return qs ? `?${qs}` : "";
 }
 

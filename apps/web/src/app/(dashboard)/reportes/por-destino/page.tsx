@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Recycle, Wallet, Leaf, ArrowRightLeft, Boxes } from "lucide-react";
 import { useReporte } from "@/hooks/use-reportes";
 import type { ReportePorDestino } from "@/types/reportes";
+import { MultiSelect } from "@/components/shared/multi-select";
 import { ReporteShell } from "../_components/reporte-shell";
 import {
   ReportePeriodoFiltro,
@@ -20,6 +21,12 @@ const TIPO_LABEL: Record<string, string> = {
   desconocido: "Desconocido",
   sin_asignar: "Sin asignar",
 };
+const TIPO_OPTS = Object.entries(TIPO_LABEL).map(([value, label]) => ({
+  value,
+  label,
+}));
+
+type Filtros = Periodo & { tipo_destino?: string[] };
 
 type Fila = {
   destino: string;
@@ -40,10 +47,10 @@ const columnas: ReporteColumna<Fila>[] = [
 ];
 
 export default function PorDestinoPage() {
-  const [periodo, setPeriodo] = useState<Periodo>({});
+  const [filtros, setFiltros] = useState<Filtros>({});
   const { data, isLoading } = useReporte<ReportePorDestino>(
     "por-destino",
-    periodo,
+    filtros,
   );
 
   const rows: Fila[] = (data?.items ?? []).map((d) => ({
@@ -59,9 +66,31 @@ export default function PorDestinoPage() {
     <ReporteShell
       title="Recolección por destino"
       description="A dónde fue lo recolectado: centro operacional, comprador externo o desconocido."
-      exportar={{ endpoint: "por-destino", filtros: periodo }}
+      exportar={{ endpoint: "por-destino", filtros }}
     >
-      <ReportePeriodoFiltro value={periodo} onChange={setPeriodo} />
+      <ReportePeriodoFiltro
+        value={filtros}
+        onChange={(p) => setFiltros((f) => ({ ...f, ...p }))}
+      >
+        <div className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs font-medium">
+            Tipo de destino
+          </span>
+          <MultiSelect
+            options={TIPO_OPTS}
+            value={filtros.tipo_destino ?? []}
+            onChange={(v) =>
+              setFiltros((f) => ({
+                ...f,
+                tipo_destino: v.length ? v : undefined,
+              }))
+            }
+            placeholder="Todos"
+            noun={{ one: "tipo", many: "tipos" }}
+            className="h-8 w-[190px]"
+          />
+        </div>
+      </ReportePeriodoFiltro>
 
       <ReporteResumen
         loading={isLoading}

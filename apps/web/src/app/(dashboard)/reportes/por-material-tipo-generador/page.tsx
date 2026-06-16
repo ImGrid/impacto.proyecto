@@ -12,13 +12,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { type MultiOption } from "@/components/shared/multi-select";
+import { useMateriales } from "@/hooks/use-materiales";
+import { useTiposGenerador } from "@/hooks/use-tipos-generador";
 import { ReporteShell } from "../_components/reporte-shell";
 import {
   ReportePeriodoFiltro,
   type Periodo,
 } from "../_components/reporte-periodo-filtro";
 import { ReporteResumen } from "../_components/reporte-resumen";
+import { ReporteFiltroExtra } from "../_components/reporte-filtro-extra";
 import { fmtNum } from "../_components/format";
+
+type Filtros = Periodo & {
+  material_id?: number[];
+  tipo_generador_id?: number[];
+};
 
 /** Orden de valores únicos por kg total descendente. */
 function ordenarPorKg(
@@ -31,11 +40,21 @@ function ordenarPorKg(
 }
 
 export default function PorMaterialTipoGeneradorPage() {
-  const [periodo, setPeriodo] = useState<Periodo>({});
+  const [filtros, setFiltros] = useState<Filtros>({});
   const { data, isLoading } = useReporte<ReporteMatriz>(
     "por-material-tipo-generador",
-    periodo,
+    filtros,
   );
+  const { data: materialesCat } = useMateriales({ limit: 100, activo: true });
+  const { data: tiposCat } = useTiposGenerador({ limit: 100, activo: true });
+  const matOpts: MultiOption[] = (materialesCat?.data ?? []).map((m) => ({
+    value: String(m.id),
+    label: m.nombre,
+  }));
+  const tipoOpts: MultiOption[] = (tiposCat?.data ?? []).map((t) => ({
+    value: String(t.id),
+    label: t.nombre,
+  }));
 
   const items = data?.items ?? [];
   const materiales = ordenarPorKg(items, "material");
@@ -52,9 +71,27 @@ export default function PorMaterialTipoGeneradorPage() {
     <ReporteShell
       title="Material × tipo de generador"
       description="Qué residuo (kg) proviene de qué tipo de fuente. Solo material con origen identificado."
-      exportar={{ endpoint: "por-material-tipo-generador", filtros: periodo }}
+      exportar={{ endpoint: "por-material-tipo-generador", filtros }}
     >
-      <ReportePeriodoFiltro value={periodo} onChange={setPeriodo} />
+      <ReportePeriodoFiltro
+        value={filtros}
+        onChange={(p) => setFiltros((f) => ({ ...f, ...p }))}
+      >
+        <ReporteFiltroExtra
+          label="Material"
+          options={matOpts}
+          value={filtros.material_id}
+          onChange={(v) => setFiltros((f) => ({ ...f, material_id: v }))}
+          noun={{ one: "material", many: "materiales" }}
+        />
+        <ReporteFiltroExtra
+          label="Tipo de generador"
+          options={tipoOpts}
+          value={filtros.tipo_generador_id}
+          onChange={(v) => setFiltros((f) => ({ ...f, tipo_generador_id: v }))}
+          noun={{ one: "tipo", many: "tipos" }}
+        />
+      </ReportePeriodoFiltro>
 
       <ReporteResumen
         loading={isLoading}

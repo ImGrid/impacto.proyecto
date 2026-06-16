@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Recycle, Wallet, Leaf, Users, UsersRound } from "lucide-react";
 import { useReporte } from "@/hooks/use-reportes";
 import type { ReportePorAsociacion } from "@/types/reportes";
+import { type MultiOption } from "@/components/shared/multi-select";
+import { useAsociaciones } from "@/hooks/use-asociaciones";
 import { ReporteShell } from "../_components/reporte-shell";
 import {
   ReportePeriodoFiltro,
@@ -11,9 +13,11 @@ import {
 } from "../_components/reporte-periodo-filtro";
 import { ReporteResumen } from "../_components/reporte-resumen";
 import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
+import { ReporteFiltroExtra } from "../_components/reporte-filtro-extra";
 import { RankingChart } from "../../estadisticas/_components/ranking-chart";
 
 type Fila = ReportePorAsociacion["items"][number];
+type Filtros = Periodo & { asociacion_id?: number[] };
 
 const columnas: ReporteColumna<Fila>[] = [
   { key: "asociacion", header: "Asociación", format: "text" },
@@ -25,19 +29,35 @@ const columnas: ReporteColumna<Fila>[] = [
 ];
 
 export default function PorAsociacionPage() {
-  const [periodo, setPeriodo] = useState<Periodo>({});
+  const [filtros, setFiltros] = useState<Filtros>({});
   const { data, isLoading } = useReporte<ReportePorAsociacion>(
     "por-asociacion",
-    periodo,
+    filtros,
   );
+  const { data: asociaciones } = useAsociaciones({ limit: 100, activo: true });
+  const asocOpts: MultiOption[] = (asociaciones?.data ?? []).map((a) => ({
+    value: String(a.id),
+    label: a.nombre,
+  }));
 
   return (
     <ReporteShell
       title="Recolección por asociación"
-      description="Cuánto recolectó, generó (Bs) y evitó en CO₂ cada asociación o iniciativa en el período."
-      exportar={{ endpoint: "por-asociacion", filtros: periodo }}
+      description="Cuánto recolectó, generó (Bs) y evitó en CO₂ cada asociación o iniciativa. Puedes acotar a ciertas asociaciones."
+      exportar={{ endpoint: "por-asociacion", filtros }}
     >
-      <ReportePeriodoFiltro value={periodo} onChange={setPeriodo} />
+      <ReportePeriodoFiltro
+        value={filtros}
+        onChange={(p) => setFiltros((f) => ({ ...f, ...p }))}
+      >
+        <ReporteFiltroExtra
+          label="Asociación"
+          options={asocOpts}
+          value={filtros.asociacion_id}
+          onChange={(v) => setFiltros((f) => ({ ...f, asociacion_id: v }))}
+          noun={{ one: "asociación", many: "asociaciones" }}
+        />
+      </ReportePeriodoFiltro>
 
       <ReporteResumen
         loading={isLoading}
