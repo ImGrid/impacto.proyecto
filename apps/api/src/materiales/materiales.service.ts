@@ -3,10 +3,20 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma';
 import { PaginatedResponseDto } from '../common/dto';
 import { CreateMaterialDto, UpdateMaterialDto, MaterialQueryDto } from './dto';
+import { sugerirFactor } from './co2-sugerencia';
 
 @Injectable()
 export class MaterialesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Sugiere un factor de CO₂ (y peso por unidad) para un material según su
+   * nombre, desde la base de conocimiento curada. SOLO sugerencia: no toca la
+   * BD. El admin la confirma/edita/ignora en el formulario.
+   */
+  sugerirFactor(nombre: string) {
+    return sugerirFactor(nombre);
+  }
 
   async create(dto: CreateMaterialDto) {
     // El catálogo de materiales es global: un solo material por nombre para

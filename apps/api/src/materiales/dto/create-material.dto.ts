@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  Min,
 } from 'class-validator';
 import { unidad_medida } from '@prisma/client';
 
@@ -27,4 +28,12 @@ export class CreateMaterialDto {
   @IsNumber()
   @Type(() => Number)
   factor_co2?: number;
+
+  // Peso promedio de UNA unidad (kg). Solo aplica a materiales medidos en
+  // UNIDAD; convierte la cantidad a kg para el cálculo de volumen y CO₂.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  peso_unitario_kg?: number;
 }

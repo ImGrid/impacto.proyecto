@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, CreditCard, CheckCircle2, Coins } from "lucide-react";
+import { ArrowRight, CreditCard, CheckCircle2, Coins, Scale } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -22,6 +22,7 @@ interface AlertasCardProps {
   pendientes_pago_count: number;
   pendientes_pago_monto: number;
   pendientes_precio_count: number;
+  lineas_sin_peso_count: number;
 }
 
 function formatBs(n: number) {
@@ -35,9 +36,12 @@ export function AlertasCard({
   pendientes_pago_count,
   pendientes_pago_monto,
   pendientes_precio_count,
+  lineas_sin_peso_count,
 }: AlertasCardProps) {
   const todoAlDia =
-    pendientes_pago_count === 0 && pendientes_precio_count === 0;
+    pendientes_pago_count === 0 &&
+    pendientes_precio_count === 0 &&
+    lineas_sin_peso_count === 0;
 
   return (
     <Card>
@@ -78,6 +82,19 @@ export function AlertasCard({
               detail="Cuentan en kg/CO₂ pero aún no suman a los ingresos (Bs)"
               href="/transacciones?estado=RECOLECTADO"
               linkLabel="Poner precio"
+            />
+            <AlertaFila
+              icon={<Scale className="h-5 w-5" />}
+              color="sky"
+              visible={lineas_sin_peso_count > 0}
+              label={`${lineas_sin_peso_count} ${
+                lineas_sin_peso_count === 1
+                  ? "registro sin peso"
+                  : "registros sin peso"
+              }`}
+              detail="Materiales por unidad sin peso definido: no cuentan en kg ni CO₂"
+              href="/materiales"
+              linkLabel="Definir peso"
             />
           </>
         )}

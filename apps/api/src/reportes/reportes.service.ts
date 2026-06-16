@@ -128,6 +128,21 @@ export class ReportesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * Peso real (kg) de una línea de detalle según su unidad (alias `dt` para
+   * detalle_transaccion, `m` para material):
+   *   KG → cantidad · TONELADA → ×1000 · UNIDAD → cantidad × peso_unitario_kg.
+   *   BOLSA y UNIDAD sin peso → 0 (no convertible).
+   * Reemplaza al viejo `FILTER (WHERE dt.unidad_medida = 'KG')`, que descartaba
+   * en silencio todo lo que no fuera KG (docs/34 §1). Debe declararse ANTES del
+   * `txVolumenCte` porque este lo interpola (orden de inicialización de campos).
+   */
+  private readonly pesoKgSql = Prisma.sql`CASE dt.unidad_medida
+        WHEN 'KG' THEN dt.cantidad
+        WHEN 'TONELADA' THEN dt.cantidad * 1000
+        WHEN 'UNIDAD' THEN dt.cantidad * COALESCE(m.peso_unitario_kg, 0)
+        ELSE 0 END`;
+
+  /**
    * CTE reutilizable (sin `WITH`, para poder componer varios CTEs): pre-agrega
    * kg y CO₂ por transacción. Evita el fan-out cartesiano al unir
    * transacción×detalle y sumar `monto_total` (docs/25).
@@ -135,9 +150,8 @@ export class ReportesService {
   private readonly txVolumenCte = Prisma.sql`
     tx_volumen AS (
       SELECT dt.transaccion_id,
-             SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG') AS kg,
-             SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-               FILTER (WHERE dt.unidad_medida = 'KG') AS co2
+             SUM(${this.pesoKgSql}) AS kg,
+             SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)) AS co2
       FROM detalle_transaccion dt
       LEFT JOIN material m ON m.id = dt.material_id
       GROUP BY dt.transaccion_id
@@ -292,9 +306,8 @@ export class ReportesService {
         tg.nombre                              AS tipo_generador,
         COUNT(DISTINCT s.id)::int              AS sucursales,
         COUNT(DISTINCT dt.transaccion_id)::int AS transacciones,
-        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
-        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg,
         COALESCE(SUM(dt.subtotal), 0)::float   AS bs
       FROM detalle_transaccion dt
       JOIN transaccion t ON t.id = dt.transaccion_id
@@ -321,9 +334,8 @@ export class ReportesService {
         COUNT(DISTINCT g.id)::int              AS generadores,
         COUNT(DISTINCT s.id)::int              AS sucursales,
         COUNT(DISTINCT dt.transaccion_id)::int AS transacciones,
-        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
-        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg,
         COALESCE(SUM(dt.subtotal), 0)::float   AS bs
       FROM detalle_transaccion dt
       JOIN transaccion t ON t.id = dt.transaccion_id
@@ -362,10 +374,9 @@ export class ReportesService {
         COALESCE(m.id, 0)::int                AS material_id,
         COALESCE(m.nombre, 'Otros (sin clasificar)') AS material,
         COUNT(DISTINCT t.id)::int             AS transacciones,
-        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
         COALESCE(SUM(dt.subtotal), 0)::float  AS bs,
-        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg
       FROM detalle_transaccion dt
       JOIN transaccion t ON t.id = dt.transaccion_id
       JOIN recolector r ON r.id = t.recolector_id
@@ -413,10 +424,9 @@ export class ReportesService {
         tg.nombre                             AS tipo_generador,
         COUNT(DISTINCT g.id)::int             AS generadores,
         COUNT(DISTINCT dt.transaccion_id)::int AS transacciones,
-        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
         COALESCE(SUM(dt.subtotal), 0)::float  AS bs,
-        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg
       FROM detalle_transaccion dt
       JOIN transaccion t ON t.id = dt.transaccion_id
       JOIN sucursal s ON s.id = dt.sucursal_id
@@ -470,10 +480,9 @@ export class ReportesService {
         COALESCE(m.nombre, 'Otros (sin clasificar)') AS material,
         tg.id::int                            AS tipo_generador_id,
         tg.nombre                             AS tipo_generador,
-        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
         COALESCE(SUM(dt.subtotal), 0)::float  AS bs,
-        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg
       FROM detalle_transaccion dt
       JOIN transaccion t ON t.id = dt.transaccion_id
       JOIN sucursal s ON s.id = dt.sucursal_id
@@ -654,10 +663,9 @@ export class ReportesService {
       SELECT
         COALESCE(m.id, 0)::int                AS material_id,
         COALESCE(m.nombre, 'Otros (sin clasificar)') AS material,
-        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
         COALESCE(SUM(dt.subtotal), 0)::float  AS bs,
-        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg
       FROM transaccion t
       JOIN detalle_transaccion dt ON dt.transaccion_id = t.id
       LEFT JOIN material m ON m.id = dt.material_id
@@ -772,9 +780,8 @@ export class ReportesService {
       SELECT
         COUNT(DISTINCT t.recolector_id)::int  AS recolectoras,
         COUNT(DISTINCT t.id)::int             AS transacciones,
-        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
-        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg,
         COALESCE(SUM(dt.subtotal), 0)::float  AS bs
       FROM detalle_transaccion dt
       JOIN transaccion t ON t.id = dt.transaccion_id
@@ -801,9 +808,8 @@ export class ReportesService {
     const [total] = await this.prisma.$queryRaw<TotalLinea[]>(Prisma.sql`
       SELECT
         COUNT(DISTINCT dt.transaccion_id)::int AS transacciones,
-        COALESCE(SUM(dt.cantidad) FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS kg,
-        COALESCE(SUM(dt.cantidad * COALESCE(m.factor_co2, 0))
-          FILTER (WHERE dt.unidad_medida = 'KG'), 0)::float AS co2_kg,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg,
         COALESCE(SUM(dt.subtotal), 0)::float   AS bs
       FROM detalle_transaccion dt
       JOIN transaccion t ON t.id = dt.transaccion_id

@@ -111,7 +111,11 @@ export class DashboardService {
         },
         include: {
           detalle_transaccion: {
-            select: { cantidad: true, unidad_medida: true },
+            select: {
+              cantidad: true,
+              unidad_medida: true,
+              material: { select: { peso_unitario_kg: true } },
+            },
           },
         },
       }),
@@ -157,6 +161,7 @@ export class DashboardService {
           0,
         ),
         pendientes_precio_count: pendientesPrecio,
+        lineas_sin_peso_count: this.lineasSinPeso(transMesActual),
       },
       evolucion_mensual: this.evolucionMensual(transSeisMeses, now),
       distribucion_material: this.distribucionMaterial(transMesActual),
@@ -172,7 +177,12 @@ export class DashboardService {
       detalle_transaccion: {
         include: {
           material: {
-            select: { id: true, nombre: true, factor_co2: true },
+            select: {
+              id: true,
+              nombre: true,
+              factor_co2: true,
+              peso_unitario_kg: true,
+            },
           },
           // Sucursal a nivel línea (cambio 2.6): cada detalle puede traer
           // una sucursal distinta. El ranking de sucursales agrupa por
@@ -218,7 +228,10 @@ export class DashboardService {
         unidad_medida: string;
         // null en las líneas "Otro" (texto libre, sin material de catálogo).
         material_id?: number | null;
-        material: { factor_co2: Prisma.Decimal | null } | null;
+        material: {
+          factor_co2: Prisma.Decimal | null;
+          peso_unitario_kg: Prisma.Decimal | null;
+        } | null;
       }>;
     }>,
     materialFiltro?: number,
@@ -234,16 +247,12 @@ export class DashboardService {
       bs += Number(t.monto_total);
       if (t.recolector_id != null) recolectoresSet.add(t.recolector_id);
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida !== 'KG') continue;
         if (materialFiltro && d.material_id !== materialFiltro) continue;
-        const cantidad = Number(d.cantidad);
-        kg += cantidad;
-        // Las líneas "Otro" no tienen factor_co2: aportan 0 al CO₂ pero sí
-        // suman a los kg.
-        const factor = d.material?.factor_co2
-          ? Number(d.material.factor_co2)
-          : 0;
-        co2 += cantidad * factor;
+        // peso real en kg según la unidad (KG/TONELADA/UNIDAD×peso); BOLSA y
+        // UNIDAD sin peso aportan 0. Las "Otro" sin factor aportan 0 al CO₂.
+        const peso = this.pesoKg(d);
+        kg += peso;
+        co2 += peso * Number(d.material?.factor_co2 ?? 0);
       }
     }
 
@@ -266,6 +275,7 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
       }>;
     }>,
     now: Date,
@@ -285,9 +295,7 @@ export class DashboardService {
       if (pos == null) continue;
       meses[pos].bs += Number(t.monto_total);
       for (const det of t.detalle_transaccion) {
-        if (det.unidad_medida === 'KG') {
-          meses[pos].kg += Number(det.cantidad);
-        }
+        meses[pos].kg += this.pesoKg(det);
       }
     }
 
@@ -304,7 +312,11 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
-        material: { id: number; nombre: string } | null;
+        material: {
+          id: number;
+          nombre: string;
+          peso_unitario_kg: Prisma.Decimal | null;
+        } | null;
       }>;
     }>,
   ) {
@@ -312,8 +324,8 @@ export class DashboardService {
     let total = 0;
     for (const t of transacciones) {
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida !== 'KG') continue;
-        const cantidad = Number(d.cantidad);
+        const cantidad = this.pesoKg(d);
+        if (cantidad === 0) continue;
         total += cantidad;
         // Las líneas "Otro" (sin material de catálogo) se agrupan en un
         // bucket sintético con id 0 = "Otros (sin clasificar)".
@@ -345,6 +357,7 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
       }>;
     }>,
     limit: number,
@@ -363,7 +376,7 @@ export class DashboardService {
       };
       acc.bs += Number(t.monto_total);
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida === 'KG') acc.kg += Number(d.cantidad);
+        acc.kg += this.pesoKg(d);
       }
       map.set(t.recolector.id, acc);
     }
@@ -384,6 +397,7 @@ export class DashboardService {
       detalle_transaccion: Array<{
         cantidad: Prisma.Decimal;
         unidad_medida: string;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
         sucursal: {
           id: number;
           nombre: string;
@@ -400,14 +414,15 @@ export class DashboardService {
     for (const t of transacciones) {
       for (const d of t.detalle_transaccion) {
         if (!d.sucursal) continue;
-        if (d.unidad_medida !== 'KG') continue;
+        const peso = this.pesoKg(d);
+        if (peso === 0) continue;
         const acc = map.get(d.sucursal.id) ?? {
           id: d.sucursal.id,
           nombre: d.sucursal.nombre,
           generador: d.sucursal.generador.razon_social,
           kg: 0,
         };
-        acc.kg += Number(d.cantidad);
+        acc.kg += peso;
         map.set(d.sucursal.id, acc);
       }
     }
@@ -420,6 +435,77 @@ export class DashboardService {
   private round(n: number, decimals: number) {
     const f = 10 ** decimals;
     return Math.round(n * f) / f;
+  }
+
+  /**
+   * Convierte una línea de detalle a KILOGRAMOS reales según su unidad:
+   * - KG:       la cantidad ya está en kg.
+   * - TONELADA: cantidad × 1000.
+   * - UNIDAD:   cantidad × peso promedio de la unidad del material (kg).
+   *             Si el material no tiene `peso_unitario_kg` (o es "Otro" sin
+   *             material de catálogo) no se puede convertir → aporta 0 y debe
+   *             contarse aparte como "pendiente de peso" (ver lineasSinPeso).
+   * - BOLSA:    excluida (sin peso estable, decisión del cliente) → 0.
+   *
+   * Reemplaza al viejo `if (unidad === 'KG') cantidad`, que descartaba en
+   * silencio todo lo que no fuera KG (ver docs/34 §1).
+   */
+  private pesoKg(d: {
+    cantidad: Prisma.Decimal;
+    unidad_medida: string;
+    material: { peso_unitario_kg: Prisma.Decimal | null } | null;
+  }): number {
+    const cant = Number(d.cantidad);
+    switch (d.unidad_medida) {
+      case 'KG':
+        return cant;
+      case 'TONELADA':
+        return cant * 1000;
+      case 'UNIDAD':
+        return cant * Number(d.material?.peso_unitario_kg ?? 0);
+      default:
+        return 0; // BOLSA u otra unidad no convertible a peso
+    }
+  }
+
+  /** CO₂ evitado (kg) de una línea = peso real (kg) × factor del material. */
+  private co2Linea(d: {
+    cantidad: Prisma.Decimal;
+    unidad_medida: string;
+    material: {
+      peso_unitario_kg: Prisma.Decimal | null;
+      factor_co2: Prisma.Decimal | null;
+    } | null;
+  }): number {
+    return this.pesoKg(d) * Number(d.material?.factor_co2 ?? 0);
+  }
+
+  /**
+   * Cuenta las líneas que NO se pudieron convertir a kg porque están en
+   * UNIDAD pero su material no tiene `peso_unitario_kg` cargado (o es un
+   * "Otro" sin material de catálogo). Sirve para avisar al admin "faltan
+   * pesos por cargar" en lugar de descartar el dato en silencio.
+   */
+  private lineasSinPeso(
+    transacciones: Array<{
+      detalle_transaccion: Array<{
+        unidad_medida: string;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
+      }>;
+    }>,
+  ): number {
+    let n = 0;
+    for (const t of transacciones) {
+      for (const d of t.detalle_transaccion) {
+        if (
+          d.unidad_medida === 'UNIDAD' &&
+          (d.material?.peso_unitario_kg == null)
+        ) {
+          n++;
+        }
+      }
+    }
+    return n;
   }
 
   // ============================================================
@@ -538,7 +624,7 @@ export class DashboardService {
               cantidad: true,
               unidad_medida: true,
               material_id: true,
-              material: { select: { factor_co2: true } },
+              material: { select: { factor_co2: true, peso_unitario_kg: true } },
             },
           },
         } satisfies Prisma.transaccionInclude,
@@ -572,6 +658,7 @@ export class DashboardService {
         recolectoras_activas_prev: kpisPrev.recolectoras,
       },
       pendientes_precio_count: pendientesPrecio,
+      lineas_sin_peso_count: this.lineasSinPeso(transActual),
       por_recolectora: this.rankingRecolectoras(transActual, query.material_id),
       por_sucursal: this.rankingSucursales(transActual, query.material_id),
       por_material: this.rankingMateriales(transActual, query.material_id),
@@ -593,7 +680,12 @@ export class DashboardService {
       detalle_transaccion: {
         include: {
           material: {
-            select: { id: true, nombre: true, factor_co2: true },
+            select: {
+              id: true,
+              nombre: true,
+              factor_co2: true,
+              peso_unitario_kg: true,
+            },
           },
           // Sucursal a nivel línea (cambio 2.6). El ranking de sucursales
           // suma kg por sucursal recorriendo los detalles, no por una sola
@@ -674,7 +766,10 @@ export class DashboardService {
         cantidad: Prisma.Decimal;
         unidad_medida: string;
         material_id: number | null;
-        material: { factor_co2: Prisma.Decimal | null } | null;
+        material: {
+          factor_co2: Prisma.Decimal | null;
+          peso_unitario_kg: Prisma.Decimal | null;
+        } | null;
       }>;
     }>,
     materialFiltro?: number,
@@ -703,13 +798,10 @@ export class DashboardService {
       };
       acc.bs += Number(t.monto_total);
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida !== 'KG') continue;
         if (materialFiltro && d.material_id !== materialFiltro) continue;
-        const q = Number(d.cantidad);
+        const q = this.pesoKg(d);
         acc.kg += q;
-        if (d.material?.factor_co2) {
-          acc.co2_kg += q * Number(d.material.factor_co2);
-        }
+        acc.co2_kg += q * Number(d.material?.factor_co2 ?? 0);
       }
       map.set(t.recolector.id, acc);
     }
@@ -737,6 +829,7 @@ export class DashboardService {
         cantidad: Prisma.Decimal;
         unidad_medida: string;
         material_id: number | null;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
         subtotal: Prisma.Decimal;
         sucursal: {
           id: number;
@@ -768,7 +861,7 @@ export class DashboardService {
           kg: 0,
           bs: 0,
         };
-        if (d.unidad_medida === 'KG') acc.kg += Number(d.cantidad);
+        acc.kg += this.pesoKg(d);
         acc.bs += Number(d.subtotal);
         map.set(d.sucursal.id, acc);
       }
@@ -792,6 +885,7 @@ export class DashboardService {
         cantidad: Prisma.Decimal;
         unidad_medida: string;
         material_id: number | null;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
         sucursal: {
           generador: {
             tipo_generador: { id: number; nombre: string };
@@ -804,16 +898,17 @@ export class DashboardService {
     const map = new Map<number, { id: number; nombre: string; kg: number }>();
     for (const t of transacciones) {
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida !== 'KG') continue;
         if (materialFiltro && d.material_id !== materialFiltro) continue;
         const tipo = d.sucursal?.generador.tipo_generador;
         if (!tipo) continue;
+        const peso = this.pesoKg(d);
+        if (peso === 0) continue;
         const acc = map.get(tipo.id) ?? {
           id: tipo.id,
           nombre: tipo.nombre,
           kg: 0,
         };
-        acc.kg += Number(d.cantidad);
+        acc.kg += peso;
         map.set(tipo.id, acc);
       }
     }
@@ -835,6 +930,7 @@ export class DashboardService {
           id: number;
           nombre: string;
           factor_co2: Prisma.Decimal | null;
+          peso_unitario_kg: Prisma.Decimal | null;
         } | null;
       }>;
     }>,
@@ -853,13 +949,13 @@ export class DashboardService {
     let total = 0;
     for (const t of transacciones) {
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida !== 'KG') continue;
         // Las líneas "Otro" (sin material de catálogo) se agrupan bajo el
         // bucket sintético id 0 = "Otros (sin clasificar)". Si hay filtro por
         // material concreto, las "Otro" quedan fuera (id 0 ≠ filtro).
         const matId = d.material?.id ?? 0;
         if (materialFiltro && matId !== materialFiltro) continue;
-        const q = Number(d.cantidad);
+        const q = this.pesoKg(d);
+        if (q === 0) continue;
         total += q;
         const prev = map.get(matId);
         const factor = d.material?.factor_co2
@@ -901,6 +997,7 @@ export class DashboardService {
         cantidad: Prisma.Decimal;
         unidad_medida: string;
         material_id: number | null;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
       }>;
     }>,
     desde: Date,
@@ -933,9 +1030,8 @@ export class DashboardService {
       if (pos == null) continue;
       dias[pos].bs += Number(t.monto_total);
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida !== 'KG') continue;
         if (materialFiltro && d.material_id !== materialFiltro) continue;
-        dias[pos].kg += Number(d.cantidad);
+        dias[pos].kg += this.pesoKg(d);
       }
     }
     return dias.map((d) => ({
@@ -953,6 +1049,7 @@ export class DashboardService {
         cantidad: Prisma.Decimal;
         unidad_medida: string;
         material_id: number | null;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
       }>;
     }>,
     desde: Date,
@@ -987,9 +1084,8 @@ export class DashboardService {
       if (pos == null) continue;
       semanas[pos].bs += Number(t.monto_total);
       for (const d of t.detalle_transaccion) {
-        if (d.unidad_medida !== 'KG') continue;
         if (materialFiltro && d.material_id !== materialFiltro) continue;
-        semanas[pos].kg += Number(d.cantidad);
+        semanas[pos].kg += this.pesoKg(d);
       }
     }
     return semanas.map((d) => ({

@@ -89,6 +89,7 @@ export default function DashboardPage() {
           pendientes_pago_count={data.alertas.pendientes_pago_count}
           pendientes_pago_monto={data.alertas.pendientes_pago_monto}
           pendientes_precio_count={data.alertas.pendientes_precio_count}
+          lineas_sin_peso_count={data.alertas.lineas_sin_peso_count}
         />
       )}
 

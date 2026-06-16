@@ -53,8 +53,8 @@ export function useCreateMaterial() {
       nombre: string;
       descripcion?: string;
       unidad_medida_default?: UnidadMedida;
-
       factor_co2?: number;
+      peso_unitario_kg?: number;
     }) => clientPost<Material>("/materiales", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: materialesKeys.lists() });
@@ -79,8 +79,8 @@ export function useUpdateMaterial() {
         nombre?: string;
         descripcion?: string;
         unidad_medida_default?: UnidadMedida;
-  
         factor_co2?: number;
+        peso_unitario_kg?: number;
         activo?: boolean;
       };
     }) => clientPatch<Material>(`/materiales/${id}`, data),
@@ -92,6 +92,32 @@ export function useUpdateMaterial() {
       toast.error(error.message);
     },
   });
+}
+
+/**
+ * Respuesta del endpoint de sugerencia de factor de CO₂. Es SOLO sugerencia:
+ * el admin la confirma, edita o ignora. Nunca se aplica sola.
+ */
+export type SugerenciaFactor =
+  | { encontrado: false }
+  | {
+      encontrado: true;
+      material_canonico: string;
+      factor_co2: number;
+      unidad: "KG" | "UNIDAD";
+      peso_unitario_kg: number | null;
+      fuente: string;
+      anio: number;
+      confianza: "alta" | "media" | "baja";
+      metodo: "exacto" | "aproximado";
+      nota?: string;
+    };
+
+/** Pide al backend una sugerencia de factor de CO₂ según el nombre del material. */
+export function sugerirFactorMaterial(nombre: string) {
+  return clientGet<SugerenciaFactor>(
+    `/materiales/sugerir-factor?nombre=${encodeURIComponent(nombre)}`,
+  );
 }
 
 export function useDeleteMaterial() {

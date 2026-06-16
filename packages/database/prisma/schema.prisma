@@ -132,6 +132,11 @@ model material {
   descripcion           String?
   unidad_medida_default unidad_medida         @default(KG)
   factor_co2            Decimal?              @db.Decimal(10, 4)
+  peso_unitario_kg      Decimal?              @db.Decimal(10, 4)
+  factor_co2_fuente     String?               @db.VarChar(120)
+  factor_co2_anio       Int?
+  factor_co2_frontera   String?               @db.VarChar(40)
+  factor_co2_confianza  String?               @db.VarChar(10)
   activo                Boolean               @default(true)
   fecha_creacion        DateTime              @default(now()) @db.Timestamp(6)
   detalle_transaccion   detalle_transaccion[]

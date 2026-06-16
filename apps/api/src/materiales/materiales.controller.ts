@@ -32,6 +32,14 @@ export class MaterialesController {
     return this.materialesService.findAll(query);
   }
 
+  // Debe declararse ANTES de `@Get(':id')`: si no, el ParseIntPipe de `:id`
+  // capturaría "sugerir-factor" e intentaría parsearlo como número → 400.
+  // Solo ADMIN (hereda el @Roles de la clase): solo el admin crea materiales.
+  @Get('sugerir-factor')
+  sugerirFactor(@Query('nombre') nombre: string) {
+    return this.materialesService.sugerirFactor(nombre ?? '');
+  }
+
   @Get(':id')
   @Roles(rol_usuario.ADMIN, rol_usuario.ACOPIADOR, rol_usuario.RECOLECTOR, rol_usuario.GENERADOR)
   findOne(@Param('id', ParseIntPipe) id: number) {

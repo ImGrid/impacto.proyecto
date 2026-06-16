@@ -52,6 +52,8 @@ export type Material = {
   descripcion: string | null;
   unidad_medida_default: UnidadMedida | null;
   factor_co2: number | null;
+  // Peso promedio de una unidad (kg). Solo para materiales en UNIDAD; null = no aplica.
+  peso_unitario_kg: number | null;
   activo: boolean;
   fecha_creacion: string;
   // El catálogo de materiales es global (la misma lista para todos los departamentos).
@@ -517,6 +519,9 @@ export type DashboardData = {
     // Recolecciones registradas sin precio (monto 0): cuentan en volumen
     // (kg/CO₂) pero aún no aportan a los Bs. Tarea pendiente: ponerles precio.
     pendientes_precio_count: number;
+    // Líneas en UNIDAD cuyo material no tiene peso definido: no se pueden
+    // convertir a kg, así que no cuentan en kg ni CO₂. Tarea: definir el peso.
+    lineas_sin_peso_count: number;
   };
   evolucion_mensual: { mes: string; kg: number; bs: number }[];
   distribucion_material: {
@@ -565,6 +570,8 @@ export type EstadisticasData = {
   // Recolecciones del rango sin precio (monto 0): cuentan en volumen pero no
   // en Bs. Indicador para que se entienda por qué el kg puede superar al Bs.
   pendientes_precio_count: number;
+  // Líneas en UNIDAD sin peso definido en su material: no cuentan en kg/CO₂.
+  lineas_sin_peso_count: number;
   por_recolectora: {
     id: number;
     nombre: string;

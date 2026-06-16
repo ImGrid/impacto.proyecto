@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Recycle, Wallet, Leaf, Users, Coins } from "lucide-react";
+import { Recycle, Wallet, Leaf, Users, Coins, Scale } from "lucide-react";
 import { useEstadisticas } from "@/hooks/use-estadisticas";
 import type { EstadisticasFilters } from "@/types/api";
 import { KpiCard } from "../_components/kpi-card";
@@ -98,6 +98,22 @@ export default function EstadisticasPage() {
               : "recolecciones del período no tienen precio"}
             . Cuentan en los kilos y el CO₂, pero no en los ingresos (Bs) hasta
             que se les asigne un precio.
+          </span>
+        </div>
+      )}
+
+      {/* Aviso: líneas en unidad sin peso definido. No se pueden convertir a
+          kg, así que no cuentan en el volumen ni el CO₂ hasta cargar el peso. */}
+      {data && data.lineas_sin_peso_count > 0 && (
+        <div className="flex items-center gap-3 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300">
+          <Scale className="h-5 w-5 shrink-0" />
+          <span>
+            {data.lineas_sin_peso_count}{" "}
+            {data.lineas_sin_peso_count === 1
+              ? "registro del período es de un material por unidad sin peso definido"
+              : "registros del período son de materiales por unidad sin peso definido"}
+            . No cuentan en los kilos ni el CO₂ hasta que se defina el peso del
+            material.
           </span>
         </div>
       )}

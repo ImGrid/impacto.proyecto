@@ -49,6 +49,17 @@ export const columns: ColumnDef<Material>[] = [
     },
   },
   {
+    accessorKey: "peso_unitario_kg",
+    header: "Peso/unidad",
+    cell: ({ row }) => {
+      const val = row.getValue<number | null>("peso_unitario_kg");
+      if (val == null) return <span className="text-muted-foreground">—</span>;
+      return `${Number(val).toLocaleString("es-BO", {
+        maximumFractionDigits: 4,
+      })} kg`;
+    },
+  },
+  {
     accessorKey: "activo",
     header: "Estado",
     cell: ({ row }) => {
