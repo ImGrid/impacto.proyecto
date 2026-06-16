@@ -101,7 +101,20 @@ async function proxyRequest(req: NextRequest) {
     return new NextResponse(null, { status: 204 });
   }
 
-  // Devolver la respuesta del backend tal cual
+  // Descargas binarias (Excel/PDF): el backend responde con un Content-Type
+  // que NO es JSON. Se transmite el archivo tal cual, conservando los headers
+  // de tipo y de descarga (el proxy no puede hacer res.json() de un binario).
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const buffer = await response.arrayBuffer();
+    const headers = new Headers();
+    headers.set("content-type", contentType);
+    const disposition = response.headers.get("content-disposition");
+    if (disposition) headers.set("content-disposition", disposition);
+    return new NextResponse(buffer, { status: response.status, headers });
+  }
+
+  // Respuesta JSON normal
   const data = await response.json().catch(() => null);
   return NextResponse.json(data, { status: response.status });
 }

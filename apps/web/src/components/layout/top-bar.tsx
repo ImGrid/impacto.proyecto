@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Building2, Loader2 } from "lucide-react";
+import { Building2, Loader2, Headset, Phone, Mail } from "lucide-react";
 import { useDepartamentos } from "@/hooks/use-departamentos";
 import { switchDepartamento } from "@/app/actions/auth";
 import {
@@ -18,6 +18,12 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -142,9 +148,48 @@ export function TopBar({ departamentoActivo, departamentoFijo }: TopBarProps) {
         </BreadcrumbList>
       </Breadcrumb>
 
+      {/* Soporte: contacto del responsable del sistema (icono discreto). */}
+      <div className="ml-auto flex items-center gap-2">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground"
+              title="Soporte del sistema"
+              aria-label="Soporte del sistema"
+            >
+              <Headset className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-72">
+            <p className="text-sm font-medium">¿Necesita soporte?</p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              Si necesita ayuda con el sistema, contáctese:
+            </p>
+            <div className="mt-3 space-y-2 text-sm">
+              <a
+                href="tel:+59168507984"
+                className="hover:text-primary flex items-center gap-2"
+              >
+                <Phone className="text-muted-foreground h-4 w-4" />
+                +591 68507984
+              </a>
+              <a
+                href="mailto:poncehar0331@gmail.com"
+                className="hover:text-primary flex items-center gap-2 break-all"
+              >
+                <Mail className="text-muted-foreground h-4 w-4" />
+                poncehar0331@gmail.com
+              </a>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+
       {/* Departamento activo. Para el admin global es un switcher; para un
           admin asignado a un departamento fijo, solo el nombre (sin cambiar). */}
-      <div className="ml-auto flex items-center gap-2">
+      <div className="flex items-center gap-2">
         {isPending ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : (

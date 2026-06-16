@@ -26,6 +26,7 @@ import { TransaccionesModule } from "./transacciones";
 import { PagosModule } from "./pagos";
 import { PerfilModule } from "./perfil";
 import { DashboardModule } from "./dashboard";
+import { ReportesModule } from "./reportes";
 
 @Module({
   imports: [
@@ -48,6 +49,10 @@ import { DashboardModule } from "./dashboard";
         // perfil del recolector). En producción debe apuntar FUERA del repo
         // (ej. /var/www/triple-impacto-uploads) y nginx la sirve en /uploads.
         UPLOAD_DIR: Joi.string().default("./uploads"),
+        // Ruta al ejecutable de Chrome/Chromium para generar los PDF de
+        // reportes (puppeteer-core no descarga navegador). Local: Chrome del
+        // sistema; VPS: /usr/bin/chromium-browser. Ver docs/29.
+        PUPPETEER_EXECUTABLE_PATH: Joi.string().optional(),
       }),
     }),
 
@@ -94,6 +99,9 @@ import { DashboardModule } from "./dashboard";
 
     // Módulo - Dashboard (KPIs, gráficos y alertas del panel admin)
     DashboardModule,
+
+    // Módulo - Reportes (agregaciones SQL para Excel/PDF; sin UI por ahora)
+    ReportesModule,
 
     // Rate limiting global: 500 requests por minuto por IP.
     // Los endpoints sensibles (login, refresh, switch-departamento,

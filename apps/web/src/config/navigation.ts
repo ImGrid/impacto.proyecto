@@ -19,6 +19,7 @@ import {
   ArrowLeftRight,
   Banknote,
   BarChart3,
+  FileBarChart,
   type LucideIcon,
 } from "lucide-react";
 
@@ -86,4 +87,10 @@ export const estadisticasItem: NavItem = {
   title: "Estadísticas",
   href: "/estadisticas",
   icon: BarChart3,
+};
+
+export const reportesItem: NavItem = {
+  title: "Reportes",
+  href: "/reportes",
+  icon: FileBarChart,
 };

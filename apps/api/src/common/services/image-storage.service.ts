@@ -141,6 +141,45 @@ export class ImageStorageService {
     }
   }
 
+  /**
+   * Lee el archivo de una ruta pública (`/uploads/<subdir>/<file>`) desde disco
+   * y lo devuelve como data URI base64 (`data:image/webp;base64,...`), listo
+   * para embeber en un <img> (ej. la foto del recolector en el PDF de su ficha).
+   *
+   * Devuelve `null` si no hay ruta, el archivo no existe o la ruta sale de
+   * `UPLOAD_DIR` (defensa de path traversal). No lanza: una foto faltante no
+   * debe romper la generación del reporte.
+   */
+  async readAsDataUri(
+    publicPath: string | null | undefined,
+  ): Promise<string | null> {
+    if (!publicPath) return null;
+    const prefix = `${ImageStorageService.PUBLIC_PREFIX}/`;
+    if (!publicPath.startsWith(prefix)) return null;
+
+    const relative = publicPath.slice(ImageStorageService.PUBLIC_PREFIX.length + 1);
+    const fileAbs = resolve(this.uploadDir, relative);
+    if (!fileAbs.startsWith(this.uploadDir)) return null;
+
+    try {
+      const buffer = await fs.readFile(fileAbs);
+      const ext = fileAbs.slice(fileAbs.lastIndexOf('.') + 1).toLowerCase();
+      const mime =
+        ext === 'png'
+          ? 'image/png'
+          : ext === 'jpg' || ext === 'jpeg'
+            ? 'image/jpeg'
+            : 'image/webp';
+      return `data:${mime};base64,${buffer.toString('base64')}`;
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code !== 'ENOENT') {
+        this.logger.warn(`No se pudo leer la imagen ${publicPath}: ${e.message}`);
+      }
+      return null;
+    }
+  }
+
   /** Decodifica un base64 (con o sin prefijo data:) y valida el tamaño. */
   private decodeBase64(base64: string): Buffer {
     // Soporta tanto "data:image/png;base64,AAAA" como el base64 pelado.

@@ -4,7 +4,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, LogOut } from "lucide-react";
-import { sidebarNavigation, dashboardItem, estadisticasItem } from "@/config/navigation";
+import {
+  sidebarNavigation,
+  dashboardItem,
+  estadisticasItem,
+  reportesItem,
+} from "@/config/navigation";
 import { logout } from "@/app/actions/auth";
 import {
   Collapsible,
@@ -86,6 +91,19 @@ export function AppSidebar({ userIdentificador }: { userIdentificador: string })
                   <Link href={estadisticasItem.href}>
                     <estadisticasItem.icon />
                     <span>{estadisticasItem.title}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith(reportesItem.href)}
+                  tooltip={reportesItem.title}
+                  className="h-9 text-[0.9rem] [&>svg]:size-[1.15rem]"
+                >
+                  <Link href={reportesItem.href}>
+                    <reportesItem.icon />
+                    <span>{reportesItem.title}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
