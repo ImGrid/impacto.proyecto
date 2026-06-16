@@ -267,10 +267,9 @@ export function TransaccionFormDialog({
           : { material_id: Number(d.material_id) }),
         cantidad: parsearDecimal(d.cantidad) ?? 0,
         unidad_medida: d.unidad_medida,
-        precio_unitario:
-          mode === "entrega"
-            ? parsearDecimal(d.precio_unitario) ?? undefined
-            : undefined,
+        // Precio en ambos modos: en recolección es opcional (si lo dejan
+        // vacío, monto 0 como antes); en entrega el form ya lo exige.
+        precio_unitario: parsearDecimal(d.precio_unitario) ?? undefined,
         ...(d.sucursal_id ? { sucursal_id: Number(d.sucursal_id) } : {}),
       })),
     };
@@ -302,7 +301,7 @@ export function TransaccionFormDialog({
     mode === "recoleccion" ? "Registrar recolección" : "Registrar entrega";
   const descripcion =
     mode === "recoleccion"
-      ? "El recolector recogió pero aún no entregó. No se pide precio ni destino; el centro operacional los completará al verificar."
+      ? "El recolector recogió pero aún no entregó. Puede registrar el precio si lo conoce (opcional). El destino se asigna después, al entregar."
       : "Flujo completo: el recolector ya entregó. Se registran cantidades, precios y destino final.";
   const labelConfirmar =
     mode === "recoleccion" ? "Registrar recolección" : "Registrar entrega";
@@ -572,11 +571,7 @@ export function TransaccionFormDialog({
                     control={form.control}
                     name={`detalles.${index}.material_id`}
                     render={({ field: selectField }) => (
-                      <FormItem
-                        className={
-                          mode === "entrega" ? "col-span-4" : "col-span-6"
-                        }
-                      >
+                      <FormItem className="col-span-4">
                         <Select
                           onValueChange={selectField.onChange}
                           value={selectField.value}
@@ -650,33 +645,30 @@ export function TransaccionFormDialog({
                     )}
                   />
 
-                  {mode === "entrega" && (
-                    <FormField
-                      control={form.control}
-                      name={`detalles.${index}.precio_unitario`}
-                      render={({ field: inputField }) => (
-                        <FormItem className="col-span-3">
-                          <FormControl>
-                            <Input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="Precio (Bs)"
-                              disabled={isPending}
-                              {...inputField}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  )}
-
-                  <div
-                    className={cn(
-                      "flex justify-end pt-1",
-                      mode === "entrega" ? "col-span-1" : "col-span-2",
+                  <FormField
+                    control={form.control}
+                    name={`detalles.${index}.precio_unitario`}
+                    render={({ field: inputField }) => (
+                      <FormItem className="col-span-3">
+                        <FormControl>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder={
+                              mode === "entrega"
+                                ? "Precio (Bs)"
+                                : "Precio (opcional)"
+                            }
+                            disabled={isPending}
+                            {...inputField}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                  >
+                  />
+
+                  <div className="col-span-1 flex justify-end pt-1">
                     <Button
                       type="button"
                       variant="ghost"
