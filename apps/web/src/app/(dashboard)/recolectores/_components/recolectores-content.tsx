@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { Plus, Search, TableProperties, Map, X } from "lucide-react";
 import { useRecolectores, useRecolectoresMapa } from "@/hooks/use-recolectores";
 import { useZonas } from "@/hooks/use-zonas";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import { useAsociaciones } from "@/hooks/use-asociaciones";
 import { useMateriales } from "@/hooks/use-materiales";
 import {
@@ -24,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -61,9 +63,19 @@ export function RecolectoresContent() {
 
   const { data: recolectoresMapaData } = useRecolectoresMapa();
 
-  const { data: zonasOpts } = useZonas({ limit: 100, activo: true });
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: zonasOpts } = useZonas({
+    limit: 100,
+    activo: true,
+    departamentoId: departamentoActivo ?? undefined,
+  });
   const { data: asociacionesOpts } = useAsociaciones({ limit: 100, activo: true });
   const { data: materialesOpts } = useMateriales({ limit: 100, activo: true });
+
+  const zonaOptions = (zonasOpts?.data ?? []).map((z) => ({
+    value: String(z.id),
+    label: z.nombre,
+  }));
 
   const hasFilters =
     activo !== undefined ||
@@ -127,25 +139,19 @@ export function RecolectoresContent() {
           </SelectContent>
         </Select>
 
-        <Select
-          value={zonaId === undefined ? "all" : String(zonaId)}
-          onValueChange={(value) => {
-            setZonaId(value === "all" ? undefined : Number(value));
+        <SearchableSelect
+          options={zonaOptions}
+          value={zonaId !== undefined ? String(zonaId) : undefined}
+          onChange={(v) => {
+            setZonaId(v === undefined ? undefined : Number(v));
             setPage(1);
           }}
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Zona" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas las zonas</SelectItem>
-            {zonasOpts?.data.map((z) => (
-              <SelectItem key={z.id} value={String(z.id)}>
-                {z.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="Zona"
+          searchPlaceholder="Buscar zona..."
+          allLabel="Todas las zonas"
+          emptyText="Sin zonas"
+          className="w-[160px]"
+        />
 
         <Select
           value={asociacionId === undefined ? "all" : String(asociacionId)}

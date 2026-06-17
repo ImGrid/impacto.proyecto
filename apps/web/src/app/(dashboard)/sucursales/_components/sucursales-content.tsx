@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Plus, Search, X } from "lucide-react";
 import { useSucursales } from "@/hooks/use-sucursales";
 import { useZonas } from "@/hooks/use-zonas";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import { useGeneradores } from "@/hooks/use-generadores";
 import { ESTADO_OPTIONS, FRECUENCIA_OPTIONS } from "@/lib/constants";
 import { columns } from "./columns";
@@ -18,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 
 export function SucursalesContent() {
   const [page, setPage] = useState(1);
@@ -39,8 +41,18 @@ export function SucursalesContent() {
     generador_id: generadorId,
   });
 
-  const { data: zonasOpts } = useZonas({ limit: 100, activo: true });
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: zonasOpts } = useZonas({
+    limit: 100,
+    activo: true,
+    departamentoId: departamentoActivo ?? undefined,
+  });
   const { data: generadoresOpts } = useGeneradores({ limit: 100, activo: true });
+
+  const zonaOptions = (zonasOpts?.data ?? []).map((z) => ({
+    value: String(z.id),
+    label: z.nombre,
+  }));
 
   const hasFilters =
     activo !== undefined ||
@@ -100,25 +112,19 @@ export function SucursalesContent() {
           </SelectContent>
         </Select>
 
-        <Select
-          value={zonaId === undefined ? "all" : String(zonaId)}
-          onValueChange={(value) => {
-            setZonaId(value === "all" ? undefined : Number(value));
+        <SearchableSelect
+          options={zonaOptions}
+          value={zonaId !== undefined ? String(zonaId) : undefined}
+          onChange={(v) => {
+            setZonaId(v === undefined ? undefined : Number(v));
             setPage(1);
           }}
-        >
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Zona" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas las zonas</SelectItem>
-            {zonasOpts?.data.map((z) => (
-              <SelectItem key={z.id} value={String(z.id)}>
-                {z.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="Zona"
+          searchPlaceholder="Buscar zona..."
+          allLabel="Todas las zonas"
+          emptyText="Sin zonas"
+          className="w-[160px]"
+        />
 
         <Select
           value={frecuencia ?? "all"}

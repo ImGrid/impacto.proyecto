@@ -9,6 +9,7 @@ import { useCreateSucursal, useUpdateSucursal } from "@/hooks/use-sucursales";
 import { useGeneradores } from "@/hooks/use-generadores";
 import { useZonas } from "@/hooks/use-zonas";
 import { useMateriales } from "@/hooks/use-materiales";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import type {
   DiaSemana,
   Generador,
@@ -43,6 +44,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import { normalizarParaComparar } from "@/lib/utils";
 
 const MapPicker = dynamic(() => import("@/components/shared/map-picker"), {
@@ -151,8 +153,13 @@ export function SucursalFormDialog({
   onOpenChange,
   sucursal,
 }: SucursalFormDialogProps) {
+  const departamentoActivo = useDepartamentoActivo();
   const { data: generadoresData } = useGeneradores({ limit: 100 });
-  const { data: zonasData } = useZonas({ limit: 100 });
+  const { data: zonasData } = useZonas({
+    limit: 100,
+    activo: true,
+    departamentoId: departamentoActivo ?? undefined,
+  });
   const { data: materialesData } = useMateriales({ limit: 100 });
   const isEditing = !!sucursal;
 
@@ -210,6 +217,11 @@ function SucursalForm({
   const createMutation = useCreateSucursal();
   const updateMutation = useUpdateSucursal();
   const isPending = createMutation.isPending || updateMutation.isPending;
+
+  const zonaOptions = zonas.map((z) => ({
+    value: String(z.id),
+    label: z.nombre,
+  }));
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -424,26 +436,18 @@ function SucursalForm({
           control={form.control}
           name="zona_id"
           render={({ field }) => (
-            <FormItem>
+            <FormItem className="flex flex-col">
               <FormLabel>Zona</FormLabel>
-              <Select
-                onValueChange={field.onChange}
-                value={field.value}
+              <SearchableSelect
+                options={zonaOptions}
+                value={field.value || undefined}
+                onChange={(v) => field.onChange(v ?? "")}
+                placeholder="Seleccionar zona"
+                searchPlaceholder="Buscar zona..."
+                emptyText="Sin zonas"
+                className="w-full"
                 disabled={isPending}
-              >
-                <FormControl>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Seleccionar zona" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {zonas.map((zona) => (
-                    <SelectItem key={zona.id} value={String(zona.id)}>
-                      {zona.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
               <FormMessage />
             </FormItem>
           )}

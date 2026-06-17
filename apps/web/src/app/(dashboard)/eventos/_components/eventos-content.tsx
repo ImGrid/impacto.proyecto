@@ -4,18 +4,13 @@ import { useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { useEventos } from "@/hooks/use-eventos";
 import { useZonas } from "@/hooks/use-zonas";
+import { useDepartamentoActivo } from "@/components/departamento-context";
 import { eventosColumns } from "./eventos-columns";
 import { DataTable } from "@/components/shared/data-table";
 import { EventoFormDialog } from "./evento-form-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 
 export function EventosContent() {
   const [page, setPage] = useState(1);
@@ -31,7 +26,17 @@ export function EventosContent() {
     zona_id: zonaId,
   });
 
-  const { data: zonasOpts } = useZonas({ limit: 100, activo: true });
+  const departamentoActivo = useDepartamentoActivo();
+  const { data: zonasOpts } = useZonas({
+    limit: 100,
+    activo: true,
+    departamentoId: departamentoActivo ?? undefined,
+  });
+
+  const zonaOptions = (zonasOpts?.data ?? []).map((z) => ({
+    value: String(z.id),
+    label: z.nombre,
+  }));
 
   function handleSearchChange(e: React.ChangeEvent<HTMLInputElement>) {
     setSearch(e.target.value);
@@ -51,25 +56,19 @@ export function EventosContent() {
           />
         </div>
 
-        <Select
-          value={zonaId === undefined ? "all" : String(zonaId)}
-          onValueChange={(value) => {
-            setZonaId(value === "all" ? undefined : Number(value));
+        <SearchableSelect
+          options={zonaOptions}
+          value={zonaId !== undefined ? String(zonaId) : undefined}
+          onChange={(v) => {
+            setZonaId(v === undefined ? undefined : Number(v));
             setPage(1);
           }}
-        >
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Zona" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas las zonas</SelectItem>
-            {zonasOpts?.data.map((z) => (
-              <SelectItem key={z.id} value={String(z.id)}>
-                {z.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          placeholder="Zona"
+          searchPlaceholder="Buscar zona..."
+          allLabel="Todas las zonas"
+          emptyText="Sin zonas"
+          className="w-[180px]"
+        />
 
         <Button onClick={() => setCreateOpen(true)}>
           <Plus />
