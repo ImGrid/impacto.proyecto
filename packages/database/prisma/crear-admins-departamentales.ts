@@ -32,24 +32,27 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 // departamento_id: 1 = La Paz, 2 = Cochabamba, 3 = Santa Cruz.
+// Las contraseñas se leen de variables de entorno (NO se hardcodean: este
+// archivo está versionado). Definir en packages/database/.env o en el .env raíz:
+//   ADMIN_LAPAZ_PASSWORD, ADMIN_COCHABAMBA_PASSWORD, ADMIN_SANTACRUZ_PASSWORD
 const ADMINS = [
   {
     email: 'lapaz@tripleimpacto.bo',
-    password: 'AdminLP2026!',
+    password: process.env.ADMIN_LAPAZ_PASSWORD,
     nombre_completo: 'Administrador La Paz',
     telefono: '00000000',
     departamento_id: 1,
   },
   {
     email: 'cochabamba@tripleimpacto.bo',
-    password: 'AdminCB2026!',
+    password: process.env.ADMIN_COCHABAMBA_PASSWORD,
     nombre_completo: 'Administrador Cochabamba',
     telefono: '00000000',
     departamento_id: 2,
   },
   {
     email: 'santacruz@tripleimpacto.bo',
-    password: 'AdminSC2026!',
+    password: process.env.ADMIN_SANTACRUZ_PASSWORD,
     nombre_completo: 'Administrador Santa Cruz',
     telefono: '00000000',
     departamento_id: 3,
@@ -57,6 +60,18 @@ const ADMINS = [
 ];
 
 async function main() {
+  // Validar que las contraseñas estén definidas en el entorno.
+  for (const a of ADMINS) {
+    if (!a.password) {
+      console.error(
+        `ERROR: falta la contraseña en el entorno para ${a.email}. ` +
+          `Definí ADMIN_LAPAZ_PASSWORD / ADMIN_COCHABAMBA_PASSWORD / ` +
+          `ADMIN_SANTACRUZ_PASSWORD en el .env.`,
+      );
+      process.exit(1);
+    }
+  }
+
   // Validar que los departamentos existan antes de crear nada.
   for (const a of ADMINS) {
     const depto = await prisma.departamento.findUnique({
@@ -71,7 +86,7 @@ async function main() {
   }
 
   for (const a of ADMINS) {
-    const passwordHash = await argon2.hash(a.password);
+    const passwordHash = await argon2.hash(a.password!);
 
     // 1. Usuario base (idempotente por email). En el create se setea la
     //    contraseña; en re-ejecuciones no se sobreescribe.
