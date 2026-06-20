@@ -605,6 +605,19 @@ export type EstadisticasData = {
     kg: number;
     bs: number;
   }[];
+  // Recolecciones de UNA recolectora (solo presente en el drill-through de
+  // perfil, cuando se filtró por recolector_id). Cada entrega con su ORIGEN
+  // (de dónde recolectó: sucursal→generador, puede ser varios) y la
+  // OBSERVACIÓN registrada. undefined en el panorama general.
+  recolecciones?: {
+    id: number;
+    fecha: string;
+    estado: string;
+    observaciones: string | null;
+    origenes: { sucursal: string; generador: string | null }[];
+    kg: number;
+    bs: number;
+  }[];
 };
 
 // --- Paginación ---

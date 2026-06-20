@@ -44,6 +44,7 @@ export default function PorMaterialPage() {
       title="Recolección por material"
       description="Cuánto se recicla de cada material, su porcentaje del total, CO₂ evitado e ingresos. Puedes acotar a ciertos materiales."
       exportar={{ endpoint: "por-material", filtros }}
+      graficables
     >
       <ReportePeriodoFiltro
         value={filtros}

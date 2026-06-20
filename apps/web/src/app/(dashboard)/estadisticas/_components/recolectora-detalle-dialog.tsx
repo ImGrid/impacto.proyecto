@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { formatearFechaSolo } from "@/lib/utils";
 import { useRecolectorDetalle } from "@/hooks/use-recolectores";
 import { useEstadisticas } from "@/hooks/use-estadisticas";
 import type { EstadisticasFilters } from "@/types/api";
@@ -172,6 +173,54 @@ function DetalleBody({
           </p>
         )}
       </div>
+
+      {/* Recolecciones del período: de dónde recolectó + observaciones.
+          Solo aparece en este modal de perfil (el backend la incluye cuando
+          se filtró por recolector_id). */}
+      {stats?.recolecciones && stats.recolecciones.length > 0 && (
+        <div>
+          <h4 className="mb-2 text-sm font-medium">
+            Recolecciones del período
+          </h4>
+          <ul className="divide-border divide-y rounded-md border">
+            {stats.recolecciones.map((r) => (
+              <li key={r.id} className="px-3 py-2.5 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-medium">
+                    {formatearFechaSolo(r.fecha)}
+                  </span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {fmt(r.kg)} kg · {fmt(r.bs)} Bs
+                  </span>
+                </div>
+                {/* De dónde recolectó (una recolección puede tener varios
+                    orígenes; las líneas sin sucursal no aportan origen). */}
+                <p className="text-muted-foreground mt-1 flex items-start gap-1 text-xs">
+                  <MapPin className="mt-0.5 h-3 w-3 shrink-0" />
+                  {r.origenes.length > 0 ? (
+                    <span>
+                      {r.origenes
+                        .map((o) =>
+                          o.generador
+                            ? `${o.sucursal} (${o.generador})`
+                            : o.sucursal,
+                        )
+                        .join(" · ")}
+                    </span>
+                  ) : (
+                    <span>Origen no especificado</span>
+                  )}
+                </p>
+                {r.observaciones && (
+                  <p className="mt-1 text-xs italic">
+                    “{r.observaciones}”
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

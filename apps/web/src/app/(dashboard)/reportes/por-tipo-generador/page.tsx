@@ -45,6 +45,7 @@ export default function PorTipoGeneradorPage() {
       title="Recolección por tipo de generador"
       description="Qué cantidad proviene de bancos, ferias, colegios y demás tipos de fuente. Puedes acotar a ciertos tipos."
       exportar={{ endpoint: "por-tipo-generador", filtros }}
+      graficables
     >
       <ReportePeriodoFiltro
         value={filtros}

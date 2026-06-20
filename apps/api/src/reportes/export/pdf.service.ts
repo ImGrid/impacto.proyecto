@@ -22,6 +22,22 @@ export class PdfService implements OnModuleDestroy {
   private browser: Browser | null = null;
   private launching: Promise<Browser> | null = null;
 
+  // Concurrencia: cada PDF abre una `page` (RAM no trivial) y el VPS comparte
+  // memoria con otros servicios, así que se limita cuántas se generan a la vez.
+  // Las que excedan el tope esperan en una cola FIFO (mismo patrón que
+  // Gotenberg: tope de concurrencia + cola), con timeout para no acumular
+  // peticiones colgadas.
+  private readonly maxConcurrent = 2;
+  private readonly queueTimeoutMs = 30000;
+  private active = 0;
+  private readonly queue: Array<() => void> = [];
+
+  // Reciclaje: un Chrome de larga vida acumula fugas; tras N PDFs se cierra y
+  // relanza (defensa estándar; Gotenberg recicla cada 100). Solo en reposo
+  // (sin pages activas) para no matar PDFs en curso.
+  private readonly recycleAfter = 80;
+  private renderCount = 0;
+
   private async getBrowser(): Promise<Browser> {
     if (this.browser) return this.browser;
     if (this.launching) return this.launching;
@@ -45,10 +61,14 @@ export class PdfService implements OnModuleDestroy {
       .then((b) => {
         this.browser = b;
         this.launching = null;
-        // Si el navegador muere, soltamos la referencia para relanzarlo.
+        // Si ESTE navegador muere, soltamos la referencia para relanzarlo. Se
+        // compara la instancia para no pisar un browser ya relanzado (ni avisar
+        // de "desconexión" cuando el cierre fue un reciclaje intencional).
         b.on('disconnected', () => {
-          this.browser = null;
-          this.logger.warn('El navegador de PDF se desconectó; se relanzará.');
+          if (this.browser === b) {
+            this.browser = null;
+            this.logger.warn('El navegador de PDF se desconectó; se relanzará.');
+          }
         });
         this.logger.log('Navegador de PDF iniciado.');
         return b;
@@ -66,29 +86,88 @@ export class PdfService implements OnModuleDestroy {
     html: string,
     opts: { landscape?: boolean } = {},
   ): Promise<Buffer> {
-    const browser = await this.getBrowser();
-    const page = await browser.newPage();
+    await this.acquire();
     try {
-      // HTML autocontenido (CSS y logo en base64, sin red) → 'load' basta.
-      // Luego esperamos a que el tipo de letra esté listo antes de imprimir.
-      await page.setContent(html, { waitUntil: 'load' });
-      await page.evaluateHandle('document.fonts.ready');
+      const browser = await this.getBrowser();
+      const page = await browser.newPage();
+      try {
+        // HTML autocontenido (CSS y logo en base64, sin red) → 'load' basta.
+        // Luego esperamos a que el tipo de letra esté listo antes de imprimir.
+        await page.setContent(html, { waitUntil: 'load' });
+        await page.evaluateHandle('document.fonts.ready');
 
-      const pdf = await page.pdf({
-        format: 'A4',
-        landscape: opts.landscape ?? false,
-        printBackground: true,
-        displayHeaderFooter: true,
-        headerTemplate: '<span></span>', // sin cabecera nativa (va en el body)
-        footerTemplate: PIE_PDF,
-        // Márgenes amplios arriba/abajo para que quepa el pie nativo.
-        margin: { top: '12mm', right: '11mm', bottom: '15mm', left: '11mm' },
-        timeout: 30000,
-      });
-      return Buffer.from(pdf);
+        const pdf = await page.pdf({
+          format: 'A4',
+          landscape: opts.landscape ?? false,
+          printBackground: true,
+          displayHeaderFooter: true,
+          headerTemplate: '<span></span>', // sin cabecera nativa (va en el body)
+          footerTemplate: PIE_PDF,
+          // Márgenes amplios arriba/abajo para que quepa el pie nativo.
+          margin: { top: '12mm', right: '11mm', bottom: '15mm', left: '11mm' },
+          timeout: 30000,
+        });
+        return Buffer.from(pdf);
+      } finally {
+        await page.close().catch(() => undefined);
+      }
     } finally {
-      await page.close();
+      this.renderCount++;
+      this.release();
+      await this.maybeRecycle();
     }
+  }
+
+  /**
+   * Reserva un cupo de concurrencia. Si ya hay `maxConcurrent` PDFs en curso,
+   * espera en una cola FIFO hasta que se libere uno (o falla tras
+   * `queueTimeoutMs`, para no acumular peticiones colgadas).
+   */
+  private acquire(): Promise<void> {
+    if (this.active < this.maxConcurrent) {
+      this.active++;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const grant = () => {
+        clearTimeout(timer);
+        this.active++;
+        resolve();
+      };
+      timer = setTimeout(() => {
+        const i = this.queue.indexOf(grant);
+        if (i >= 0) this.queue.splice(i, 1);
+        reject(
+          new Error(
+            'El servidor está generando otros reportes; intente de nuevo en unos segundos.',
+          ),
+        );
+      }, this.queueTimeoutMs);
+      this.queue.push(grant);
+    });
+  }
+
+  /** Libera el cupo y, si hay alguien esperando, le cede el turno. */
+  private release(): void {
+    this.active--;
+    const next = this.queue.shift();
+    if (next) next();
+  }
+
+  /**
+   * Recicla el navegador tras `recycleAfter` PDFs, solo en reposo (sin pages
+   * activas, para no matar PDFs en curso). Deja `browser = null` para que el
+   * próximo render lo relance con el patrón "one future" de `getBrowser`.
+   */
+  private async maybeRecycle(): Promise<void> {
+    if (this.renderCount < this.recycleAfter || this.active > 0 || !this.browser)
+      return;
+    this.renderCount = 0;
+    const old = this.browser;
+    this.browser = null;
+    this.logger.log('Reciclando el navegador de PDF (anti-fuga de memoria).');
+    await old.close().catch(() => undefined);
   }
 
   async onModuleDestroy() {

@@ -468,18 +468,6 @@ export class DashboardService {
     }
   }
 
-  /** CO₂ evitado (kg) de una línea = peso real (kg) × factor del material. */
-  private co2Linea(d: {
-    cantidad: Prisma.Decimal;
-    unidad_medida: string;
-    material: {
-      peso_unitario_kg: Prisma.Decimal | null;
-      factor_co2: Prisma.Decimal | null;
-    } | null;
-  }): number {
-    return this.pesoKg(d) * Number(d.material?.factor_co2 ?? 0);
-  }
-
   /**
    * Cuenta las líneas que NO se pudieron convertir a kg porque están en
    * UNIDAD pero su material no tiene `peso_unitario_kg` cargado (o es un
@@ -672,7 +660,76 @@ export class DashboardService {
         hasta,
         query.material_id,
       ),
+      // Lista de recolecciones con ORIGEN (de dónde recolectó) + OBSERVACIONES.
+      // Solo se arma en el drill-through de perfil (cuando hay recolector_id);
+      // en el panorama general no aplica (sería de "todas" las recolectoras).
+      recolecciones: query.recolector_id
+        ? this.recoleccionesRecolectora(transActual)
+        : undefined,
     };
+  }
+
+  /**
+   * Lista de recolecciones (transacciones) de UNA recolectora en el rango, con:
+   * - ORIGEN ("de dónde recolectó"): la(s) sucursal(es)→generador de sus líneas.
+   *   Una sola recolección puede traer material de VARIAS sucursales (cambio
+   *   2.6), por eso `origenes` es una lista deduplicada por sucursal.
+   * - OBSERVACIONES: la nota libre que se registró en la transacción (suele
+   *   estar vacía; el operador la ve solo si existe).
+   *
+   * Reusa `transActual` (ya cargado con el include de estadísticas) → sin
+   * consultas extra. El peso se calcula con el mismo `pesoKg` que el resto de
+   * métricas para que el kg de la fila reconcilie con los KPIs del perfil.
+   */
+  private recoleccionesRecolectora(
+    transacciones: Array<{
+      id: number;
+      fecha: Date;
+      estado: string;
+      observaciones: string | null;
+      monto_total: Prisma.Decimal;
+      detalle_transaccion: Array<{
+        cantidad: Prisma.Decimal;
+        unidad_medida: string;
+        material: { peso_unitario_kg: Prisma.Decimal | null } | null;
+        sucursal: {
+          id: number;
+          nombre: string;
+          generador: { razon_social: string };
+        } | null;
+      }>;
+    }>,
+  ) {
+    return transacciones
+      .map((t) => {
+        // Orígenes distintos de la recolección (deduplicados por sucursal.id).
+        // Las líneas sin sucursal (origen no identificado) no aportan origen.
+        const origenes = new Map<
+          number,
+          { sucursal: string; generador: string | null }
+        >();
+        let kg = 0;
+        for (const d of t.detalle_transaccion) {
+          kg += this.pesoKg(d);
+          if (d.sucursal && !origenes.has(d.sucursal.id)) {
+            origenes.set(d.sucursal.id, {
+              sucursal: d.sucursal.nombre,
+              generador: d.sucursal.generador?.razon_social ?? null,
+            });
+          }
+        }
+        return {
+          id: t.id,
+          fecha: t.fecha.toISOString(),
+          estado: t.estado,
+          observaciones: t.observaciones,
+          origenes: Array.from(origenes.values()),
+          kg: this.round(kg, 2),
+          bs: this.round(Number(t.monto_total), 2),
+        };
+      })
+      // Más reciente primero (las fechas son ISO → orden lexicográfico sirve).
+      .sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
   }
 
   private transaccionEstadisticasInclude() {

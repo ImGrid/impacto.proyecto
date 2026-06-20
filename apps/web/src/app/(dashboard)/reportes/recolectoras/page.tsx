@@ -92,6 +92,7 @@ export default function RecolectorasPage() {
       title="Recolectoras"
       description="Filtra por edad, género, asociación, zona o material (puedes elegir varios), o marca recolectoras específicas para exportarlas."
       exportar={{ endpoint: "recolectoras", filtros }}
+      graficables
     >
       <RecolectorasFiltros value={filtros} onChange={setFiltros} />
 

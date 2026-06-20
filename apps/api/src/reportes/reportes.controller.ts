@@ -30,6 +30,7 @@ import {
   type PdfTipoCol,
   type PdfColumna,
 } from './export/pdf.util';
+import { svgBarras, svgDonaGenero } from './export/chart.util';
 import { PdfService } from './export/pdf.service';
 import { ImageStorageService } from '../common/services/image-storage.service';
 
@@ -141,6 +142,17 @@ export class ReportesController {
         columnas: aPdf(cols),
         filas: data.items,
         total,
+        grafico:
+          query.graficos === false
+            ? undefined
+            : (svgBarras({
+                items: data.items.map((i) => ({
+                  label: i.asociacion,
+                  value: i.kg,
+                })),
+                formato: 'kg',
+                titulo: 'Recolectado por asociación (kg)',
+              }) ?? undefined),
       });
       return this.enviarPdf(res, await this.pdf.render(html), 'reporte-por-asociacion.pdf');
     }
@@ -191,6 +203,14 @@ export class ReportesController {
         columnas: aPdf(cols),
         filas: data.items,
         total,
+        grafico:
+          query.graficos === false
+            ? undefined
+            : (svgBarras({
+                items: data.items.map((i) => ({ label: i.zona, value: i.kg })),
+                formato: 'kg',
+                titulo: 'Recolectado por zona (kg)',
+              }) ?? undefined),
       });
       return this.enviarPdf(res, await this.pdf.render(html), 'reporte-por-zona.pdf');
     }
@@ -295,6 +315,17 @@ export class ReportesController {
         columnas: aPdf(cols),
         filas: data.items,
         total,
+        grafico:
+          query.graficos === false
+            ? undefined
+            : (svgBarras({
+                items: data.items.map((i) => ({
+                  label: i.material,
+                  value: i.kg,
+                })),
+                formato: 'kg',
+                titulo: 'Recolectado por material (kg)',
+              }) ?? undefined),
       });
       return this.enviarPdf(res, await this.pdf.render(html), 'reporte-por-material.pdf');
     }
@@ -349,6 +380,17 @@ export class ReportesController {
         columnas: aPdf(cols),
         filas,
         total,
+        grafico:
+          query.graficos === false
+            ? undefined
+            : (svgBarras({
+                items: data.items.map((i) => ({
+                  label: i.generador,
+                  value: i.kg,
+                })),
+                formato: 'kg',
+                titulo: 'Recolectado por generador (kg)',
+              }) ?? undefined),
       });
       return this.enviarPdf(res, await this.pdf.render(html), 'reporte-por-generador.pdf');
     }
@@ -397,6 +439,17 @@ export class ReportesController {
         columnas: aPdf(cols),
         filas: data.items,
         total,
+        grafico:
+          query.graficos === false
+            ? undefined
+            : (svgBarras({
+                items: data.items.map((i) => ({
+                  label: i.tipo_generador,
+                  value: i.kg,
+                })),
+                formato: 'kg',
+                titulo: 'Recolectado por tipo de generador (kg)',
+              }) ?? undefined),
       });
       return this.enviarPdf(res, await this.pdf.render(html), 'reporte-por-tipo-generador.pdf');
     }
@@ -479,6 +532,35 @@ export class ReportesController {
       bs: data.total.bs,
     };
     if (query.formato === 'pdf') {
+      // Dos gráficos, un mensaje cada uno (principio "un gráfico, un mensaje"):
+      // distribución por género (dona, 2 categorías) + top-10 por recolectado
+      // (barras). `data.items` ya viene ordenado por kg desc, así que el slice
+      // top-10 lo hace svgBarras. Las inactivas (kg 0) quedan fuera de las
+      // barras (filtra value>0) pero sí cuentan en el género del grupo filtrado.
+      const mujeres = data.items.filter((r) => r.genero === 'MUJER').length;
+      const hombres = data.items.filter((r) => r.genero === 'HOMBRE').length;
+      // Dos gráficos LADO A LADO (la dona a su ancho natural, las barras toman
+      // el resto): en landscape ocupan poca altura, así no dejan hueco ni
+      // empujan la tabla a otra hoja.
+      const dona =
+        svgDonaGenero({
+          mujeres,
+          hombres,
+          titulo: 'Distribución por género',
+          clase: 'g-dona',
+        }) ?? '';
+      const barras =
+        svgBarras({
+          items: data.items.map((r) => ({ label: r.nombre, value: r.kg })),
+          formato: 'kg',
+          titulo: 'Top recolectoras por recolectado (kg)',
+          maxItems: 10,
+          clase: 'g-barras',
+        }) ?? '';
+      const grafico =
+        query.graficos === false || !(dona || barras)
+          ? undefined
+          : `<div class="grafico-par">${dona}${barras}</div>`;
       const html = construirPdfReporte({
         titulo: 'Recolectoras',
         periodo: data.rango,
@@ -492,6 +574,7 @@ export class ReportesController {
         columnas: aPdf(cols),
         filas,
         total,
+        grafico: grafico || undefined,
       });
       // Horizontal: muchas columnas (datos + actividad) caben mejor apaisado.
       return this.enviarPdf(

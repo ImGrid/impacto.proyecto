@@ -45,6 +45,7 @@ export default function PorAsociacionPage() {
       title="Recolección por asociación"
       description="Cuánto recolectó, generó (Bs) y evitó en CO₂ cada asociación o iniciativa. Puedes acotar a ciertas asociaciones."
       exportar={{ endpoint: "por-asociacion", filtros }}
+      graficables
     >
       <ReportePeriodoFiltro
         value={filtros}

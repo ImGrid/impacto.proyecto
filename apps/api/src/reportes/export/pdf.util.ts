@@ -128,6 +128,21 @@ const ESTILOS = `
   .datos-wrap .datos { flex: 1; }
   .foto { width: 92px; height: auto; border: 1px solid #d9e0e1; border-radius: 6px;
           object-fit: cover; flex: 0 0 auto; }
+  /* gráficos (SVG inline generado en el servidor) */
+  .grafico { margin: 4px 0 16px; page-break-inside: avoid; }
+  .grafico .cap { font-size: 10px; color: ${GRIS}; font-weight: 600; margin: 0 0 6px; }
+  .grafico svg { display: block; }
+  .grafico-flex { display: flex; gap: 20px; align-items: center; page-break-inside: avoid; }
+  /* dos gráficos lado a lado (recolectoras en landscape): la dona ocupa su
+     ancho natural y las barras toman el resto → bloque compacto en altura,
+     no deja hueco ni empuja la tabla a otra página */
+  .grafico-par { display: flex; gap: 28px; align-items: flex-start; page-break-inside: avoid; margin: 4px 0 16px; }
+  .grafico-par > .grafico { margin: 0; }
+  .grafico-par > .g-dona { flex: 0 0 auto; }
+  .grafico-par > .g-barras { flex: 1 1 0; min-width: 0; }
+  .dona-leyenda { font-size: 10.5px; color: #1a1a1a; }
+  .dona-leyenda .it { display: flex; align-items: center; gap: 6px; margin: 5px 0; }
+  .dona-leyenda .sw { width: 11px; height: 11px; border-radius: 2px; display: inline-block; flex: 0 0 auto; }
 `;
 
 /** Cabecera del documento: logo + título + período + emisión. */
@@ -231,10 +246,17 @@ export function construirPdfReporte(opts: {
   columnas: PdfColumna[];
   filas: Record<string, unknown>[];
   total?: Record<string, unknown>;
+  /**
+   * Gráfico(s) como HTML/SVG ya construido (ver chart.util). Se inyecta entre
+   * los KPIs y la tabla. Opcional: si el reporte no aplica gráfico (o el filtro
+   * lo dejó degenerado), no se pasa y el reporte sale solo con la tabla.
+   */
+  grafico?: string;
 }): string {
   return documento(
     cabeceraHtml(opts.titulo, opts.periodo) +
       kpisHtml(opts.kpis) +
+      (opts.grafico ?? '') +
       tablaHtml(opts.columnas, opts.filas, opts.total),
   );
 }

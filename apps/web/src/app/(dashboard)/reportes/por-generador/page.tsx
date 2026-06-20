@@ -61,6 +61,7 @@ export default function PorGeneradorPage() {
       title="Cantidad por generador"
       description="Cuánto aportó cada empresa generadora a través de sus sucursales. Puedes acotar a ciertos generadores."
       exportar={{ endpoint: "por-generador", filtros }}
+      graficables
     >
       <ReportePeriodoFiltro
         value={filtros}

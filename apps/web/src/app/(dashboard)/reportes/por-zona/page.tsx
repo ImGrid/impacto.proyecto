@@ -49,6 +49,7 @@ export default function PorZonaPage() {
       title="Recolección por zona"
       description="Volumen recolectado, ingresos y CO₂ por zona y ciudad. Puedes acotar a ciertas zonas."
       exportar={{ endpoint: "por-zona", filtros }}
+      graficables
     >
       <ReportePeriodoFiltro
         value={filtros}
