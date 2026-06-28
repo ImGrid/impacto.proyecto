@@ -1,16 +1,8 @@
 "use client";
 
 import { format } from "date-fns";
-import { es } from "date-fns/locale";
-import { CalendarIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { DatePick } from "./date-pick";
 
 export type Periodo = { desde?: string; hasta?: string };
 
@@ -37,11 +29,14 @@ export function ReportePeriodoFiltro({
   value,
   onChange,
   children,
+  sinFechasLabel = "Si no eliges fechas, se muestran los últimos 30 días",
 }: {
   value: Periodo;
   onChange: (p: Periodo) => void;
   /** Filtros extra (p. ej. un multi-select de material) en la misma barra. */
   children?: React.ReactNode;
+  /** Texto del hint de "sin fechas" (cada reporte define su default real). */
+  sinFechasLabel?: string;
 }) {
   const desde = parse(value.desde);
   const hasta = parse(value.hasta);
@@ -77,65 +72,48 @@ export function ReportePeriodoFiltro({
           <Button
             variant="outline"
             size="sm"
+            onClick={() => {
+              const n = new Date();
+              const ini = new Date(n.getFullYear(), n.getMonth() - 1, 1);
+              const fin = new Date(n.getFullYear(), n.getMonth(), 0);
+              onChange({ desde: fmtD(ini), hasta: fmtD(fin) });
+            }}
+          >
+            Mes pasado
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const n = new Date();
+              const ini = new Date(n.getFullYear(), n.getMonth() - 2, 1);
+              onChange({ desde: fmtD(ini), hasta: hoyStr() });
+            }}
+          >
+            Últimos 3 meses
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => onChange({ desde: `${y}-01-01`, hasta: hoyStr() })}
           >
             Este año
           </Button>
           {(value.desde || value.hasta) && (
-            <Button variant="ghost" size="sm" onClick={() => onChange({})}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onChange({ desde: undefined, hasta: undefined })}
+            >
               Limpiar
             </Button>
           )}
         </div>
       </div>
       <p className="text-muted-foreground ml-auto self-center text-xs">
-        Sin fechas: últimos 30 días
+        {sinFechasLabel}
       </p>
     </div>
   );
 }
 
-function DatePick({
-  label,
-  date,
-  onSelect,
-  min,
-  max,
-}: {
-  label: string;
-  date?: Date;
-  onSelect: (d?: Date) => void;
-  min?: Date;
-  max?: Date;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-muted-foreground text-xs font-medium">{label}</label>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              "w-[150px] justify-start text-left font-normal",
-              !date && "text-muted-foreground",
-            )}
-          >
-            <CalendarIcon className="mr-2 h-3.5 w-3.5" />
-            {date ? format(date, "dd MMM yyyy", { locale: es }) : "Elegir"}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="single"
-            selected={date}
-            onSelect={onSelect}
-            locale={es}
-            disabled={(d) => (max ? d > max : false) || (min ? d < min : false)}
-            initialFocus
-          />
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
-}

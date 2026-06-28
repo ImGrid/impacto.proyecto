@@ -150,7 +150,10 @@ function cabeceraHtml(
   titulo: string,
   periodo: { desde: string; hasta: string },
   extra?: string,
+  periodoLabel?: string,
 ): string {
+  const periodoTxt =
+    periodoLabel ?? `${fechaBO(periodo.desde)} – ${fechaBO(periodo.hasta)}`;
   return `
   <div class="cab">
     <img src="${LOGO_TRIPLE_IMPACTO}" alt="Triple Impacto" />
@@ -160,7 +163,7 @@ function cabeceraHtml(
     </div>
   </div>
   <h1 class="titulo">${escapeHtml(titulo)}</h1>
-  <p class="subt">Período: ${fechaBO(periodo.desde)} – ${fechaBO(periodo.hasta)}${
+  <p class="subt">Período: ${escapeHtml(periodoTxt)}${
     extra ? ` · ${escapeHtml(extra)}` : ''
   }</p>`;
 }
@@ -252,9 +255,11 @@ export function construirPdfReporte(opts: {
    * lo dejó degenerado), no se pasa y el reporte sale solo con la tabla.
    */
   grafico?: string;
+  /** Texto del período si no es un rango de fechas (p. ej. "Todo el histórico"). */
+  periodoLabel?: string;
 }): string {
   return documento(
-    cabeceraHtml(opts.titulo, opts.periodo) +
+    cabeceraHtml(opts.titulo, opts.periodo, undefined, opts.periodoLabel) +
       kpisHtml(opts.kpis) +
       (opts.grafico ?? '') +
       tablaHtml(opts.columnas, opts.filas, opts.total),
@@ -308,6 +313,101 @@ export function construirPdfMatriz(opts: {
   return documento(
     cabeceraHtml('Material × tipo de generador', opts.periodo, 'kilos (kg)') +
       `<table><thead><tr>${ths}</tr></thead><tbody>${cuerpo}</tbody></table>`,
+  );
+}
+
+/** Ficha de UNA sucursal (datos + actividad real con desglose por material). */
+export function construirPdfSucursal(opts: {
+  periodo: { desde: string; hasta: string };
+  perfil: {
+    nombre: string;
+    direccion: string;
+    horario: string | null;
+    generador: string;
+    tipo_generador: string;
+    zona: string | null;
+    ciudad: string | null;
+    departamento: string | null;
+  };
+  actividad: {
+    total: { transacciones: number; kg: number; co2_kg: number; bs: number };
+    por_material: { material: string; kg: number; bs: number }[];
+    entregas: {
+      fecha: Date | string;
+      recolector: string | null;
+      kg: number;
+      bs: number;
+    }[];
+  };
+}): string {
+  const { perfil, actividad } = opts;
+  const fechaCorta = (f: Date | string) =>
+    new Intl.DateTimeFormat('es-BO', {
+      timeZone: 'UTC',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(new Date(f));
+
+  const fila = (k: string, v: string) =>
+    `<div class="fila"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span></div>`;
+
+  const gridDatos = `<div class="datos">${[
+    fila('Generador', perfil.generador),
+    fila('Tipo', perfil.tipo_generador),
+    fila('Dirección', perfil.direccion),
+    fila('Zona', perfil.zona ?? '—'),
+    fila('Ciudad', perfil.ciudad ?? '—'),
+    fila('Departamento', perfil.departamento ?? '—'),
+    ...(perfil.horario ? [fila('Horario', perfil.horario)] : []),
+  ].join('')}</div>`;
+  const datos = `<div class="seccion"><h2>Datos</h2>${gridDatos}</div>`;
+
+  const kpis = kpisHtml([
+    { label: 'Entregas', value: ent(actividad.total.transacciones) },
+    { label: 'Recolectado', value: kg(actividad.total.kg) },
+    { label: 'CO₂ evitado', value: kg(actividad.total.co2_kg) },
+    { label: 'Generado', value: bs(actividad.total.bs) },
+  ]);
+
+  const porMaterial = actividad.por_material.length
+    ? `<p class="subt" style="margin:0 0 4px">Qué recolectó exactamente</p>` +
+      tablaHtml(
+        [
+          { key: 'material', header: 'Material' },
+          { key: 'kg', header: 'Recolectado', tipo: 'kg' },
+          { key: 'bs', header: 'Generado', tipo: 'bs' },
+        ],
+        actividad.por_material.map((m) => ({
+          material: m.material,
+          kg: m.kg,
+          bs: m.bs,
+        })),
+      )
+    : '';
+
+  const entregas = actividad.entregas.length
+    ? `<p class="subt" style="margin:10px 0 4px">Entregas en el período</p>` +
+      tablaHtml(
+        [
+          { key: 'fecha', header: 'Fecha' },
+          { key: 'recolector', header: 'Recolector' },
+          { key: 'kg', header: 'Recolectado', tipo: 'kg' },
+          { key: 'bs', header: 'Generado', tipo: 'bs' },
+        ],
+        actividad.entregas.map((e) => ({
+          fecha: fechaCorta(e.fecha),
+          recolector: e.recolector ?? '—',
+          kg: e.kg,
+          bs: e.bs,
+        })),
+      )
+    : '';
+
+  const real = `<div class="seccion"><h2>Actividad real <small>(lo que recolectó en el período)</small></h2>${kpis}${porMaterial}${entregas}</div>`;
+
+  return documento(
+    cabeceraHtml(`Sucursal · ${perfil.nombre}`, opts.periodo) + datos + real,
   );
 }
 

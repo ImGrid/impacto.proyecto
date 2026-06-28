@@ -1,18 +1,17 @@
 "use client";
 
 import { format } from "date-fns";
-import { es } from "date-fns/locale";
-import { CalendarIcon, SlidersHorizontal, Search, X } from "lucide-react";
+import { SlidersHorizontal, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Calendar } from "@/components/ui/calendar";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { DatePick } from "../../_components/date-pick";
 import { MultiSelect, type MultiOption } from "@/components/shared/multi-select";
 import { useZonas } from "@/hooks/use-zonas";
 import { useAsociaciones } from "@/hooks/use-asociaciones";
@@ -328,47 +327,3 @@ function Segmented({
   );
 }
 
-function DatePick({
-  label,
-  date,
-  onSelect,
-  min,
-  max,
-}: {
-  label: string;
-  date?: Date;
-  onSelect: (d?: Date) => void;
-  min?: Date;
-  max?: Date;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-muted-foreground text-xs font-medium">{label}</label>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className={cn(
-              "w-[140px] justify-start text-left font-normal",
-              !date && "text-muted-foreground",
-            )}
-          >
-            <CalendarIcon className="mr-2 h-3.5 w-3.5" />
-            {date ? format(date, "dd MMM yyyy", { locale: es }) : "Elegir"}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="single"
-            selected={date}
-            onSelect={onSelect}
-            locale={es}
-            disabled={(d) => (max ? d > max : false) || (min ? d < min : false)}
-            initialFocus
-          />
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
-}

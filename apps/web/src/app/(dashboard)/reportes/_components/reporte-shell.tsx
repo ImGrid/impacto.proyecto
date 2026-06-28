@@ -52,7 +52,7 @@ export function ReporteShell({
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <Link
             href="/reportes"
             className="text-muted-foreground hover:text-foreground mb-1 inline-flex items-center gap-1 text-sm"
@@ -65,7 +65,7 @@ export function ReporteShell({
             <p className="text-muted-foreground mt-1 text-sm">{description}</p>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           {graficables && (
             <label className="text-muted-foreground flex cursor-pointer items-center gap-1.5 text-sm select-none">
               <input

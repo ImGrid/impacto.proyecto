@@ -125,6 +125,90 @@ export type ReporteMatriz = {
   }[];
 };
 
+// --- Reporte nacional (comparación entre departamentos) ---
+
+export type ReporteNacional = {
+  rango: ReporteRango;
+  total: TotalTx;
+  items: {
+    departamento_id: number;
+    departamento: string;
+    recolectoras: number;
+    transacciones: number;
+    kg: number;
+    co2_kg: number;
+    bs: number;
+  }[];
+};
+
+// --- Reporte por sucursal (lista + ficha) ---
+
+export type ReporteSucursalesFiltros = {
+  desde?: string;
+  hasta?: string;
+  search?: string;
+  generador_id?: number[];
+  tipo_generador_id?: number[];
+  zona_id?: number[];
+  /** IDs específicos (para exportar las seleccionadas). */
+  ids?: number[];
+};
+
+export type ReporteSucursalesLista = {
+  rango: ReporteRango;
+  total: {
+    sucursales: number;
+    transacciones: number;
+    kg: number;
+    co2_kg: number;
+    bs: number;
+  };
+  items: {
+    sucursal_id: number;
+    sucursal: string;
+    generador: string;
+    tipo_generador: string;
+    ciudad: string;
+    entregas: number;
+    kg: number;
+    co2_kg: number;
+    bs: number;
+  }[];
+};
+
+export type ReporteSucursalDetalle = {
+  rango: ReporteRango;
+  perfil: {
+    id: number;
+    nombre: string;
+    direccion: string;
+    horario: string | null;
+    generador: string;
+    tipo_generador: string;
+    zona: string | null;
+    ciudad: string | null;
+    departamento: string | null;
+  };
+  actividad: {
+    total: TotalLinea;
+    por_material: {
+      material_id: number;
+      material: string;
+      kg: number;
+      bs: number;
+      co2_kg: number;
+    }[];
+    entregas: {
+      transaccion_id: number;
+      fecha: string;
+      estado: string;
+      recolector: string | null;
+      kg: number;
+      bs: number;
+    }[];
+  };
+};
+
 // --- Reporte dinámico de recolectoras ---
 
 export type ReporteRecolectorasFiltros = {

@@ -1,7 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma';
-import { ReporteQueryDto, ReporteRecolectorasQueryDto } from './dto';
+import {
+  ReporteQueryDto,
+  ReporteRecolectorasQueryDto,
+  ReporteSucursalesQueryDto,
+} from './dto';
 
 // --- Tipos de fila por reporte (los CAST ::int/::float del SQL garantizan
 //     que el driver pg devuelva números, no Decimal/BigInt). ---
@@ -68,6 +72,34 @@ type FilaMatriz = {
   kg: number;
   bs: number;
   co2_kg: number;
+};
+type FilaDepartamento = {
+  departamento_id: number;
+  departamento: string;
+  recolectoras: number;
+  transacciones: number;
+  kg: number;
+  co2_kg: number;
+  bs: number;
+};
+type FilaSucursal = {
+  sucursal_id: number;
+  sucursal: string;
+  generador: string;
+  tipo_generador: string;
+  ciudad: string;
+  entregas: number;
+  kg: number;
+  co2_kg: number;
+  bs: number;
+};
+type FilaSucursalEntrega = {
+  transaccion_id: number;
+  fecha: Date;
+  estado: string;
+  recolector: string | null;
+  kg: number;
+  bs: number;
 };
 type TotalLinea = {
   transacciones: number;
@@ -277,6 +309,72 @@ export class ReportesService {
       await this.totalTx(desde, hasta, scope, filtro),
       items,
     );
+  }
+
+  // ============================================================
+  // Reporte NACIONAL — comparación entre departamentos
+  // ============================================================
+
+  /**
+   * Totales por departamento para comparar a nivel nacional. A diferencia de
+   * TODOS los demás reportes, NO filtra por el departamento activo del admin:
+   * está pensado para comparar los departamentos entre sí sin tener que cambiar
+   * el filtro global (pedido del cliente). Disponible para cualquier admin (el
+   * @Roles(ADMIN) del controller ya cubre global y departamentales).
+   *
+   * Cada transacción se asigna a UN departamento por el del recolector
+   * (verificado en BD: 0 transacciones con recolector y sucursal en deptos
+   * distintos), así no hay doble conteo y reconcilia con /estadisticas por depto.
+   * Sale `FROM departamento LEFT JOIN ...` para que los 9 departamentos aparezcan
+   * (los sin actividad en 0). Mismas convenciones de volumen/Bs/CO₂.
+   */
+  async nacional(query: ReporteQueryDto) {
+    // Default del nacional = TODO el histórico (NO "últimos 30 días" como los
+    // demás): el cliente quiere ver la comparación completa al abrir, sin que
+    // salga sparse (el dashboard ya falla en eso por estar anclado al mes).
+    const desde = query.desde
+      ? this.inicioDia(query.desde)
+      : new Date(2000, 0, 1);
+    const hasta = query.hasta
+      ? this.finDia(query.hasta)
+      : this.finDia(this.hoyKey());
+    const items = await this.prisma.$queryRaw<FilaDepartamento[]>(Prisma.sql`
+      WITH ${this.txVolumenCte}
+      SELECT
+        d.id::int                              AS departamento_id,
+        d.nombre                               AS departamento,
+        COUNT(DISTINCT t.recolector_id)::int   AS recolectoras,
+        COUNT(DISTINCT t.id)::int              AS transacciones,
+        COALESCE(SUM(tv.kg), 0)::float         AS kg,
+        COALESCE(SUM(tv.co2), 0)::float        AS co2_kg,
+        COALESCE(SUM(t.monto_total), 0)::float AS bs
+      FROM departamento d
+      LEFT JOIN recolector r ON r.departamento_id = d.id
+      LEFT JOIN transaccion t
+        ON t.recolector_id = r.id AND ${this.estados}
+        AND t.fecha BETWEEN ${desde} AND ${hasta}
+      LEFT JOIN tx_volumen tv ON tv.transaccion_id = t.id
+      WHERE d.activo = true
+      GROUP BY d.id, d.nombre
+      ORDER BY kg DESC, d.nombre
+    `);
+    // Total nacional: totalTx sin scope (todo el país en el rango).
+    return this.empaquetar(
+      desde,
+      hasta,
+      await this.totalTx(desde, hasta, Prisma.empty),
+      items,
+    );
+  }
+
+  /**
+   * Fecha de la transacción MÁS ANTIGUA del sistema. Sirve para acotar el límite
+   * inferior del calendario de los filtros (que llegue hasta el dato real más
+   * viejo, no a un año fijo). `null` si aún no hay transacciones.
+   */
+  async rangoFechas(): Promise<{ min: string | null }> {
+    const r = await this.prisma.transaccion.aggregate({ _min: { fecha: true } });
+    return { min: r._min.fecha ? r._min.fecha.toISOString() : null };
   }
 
   // ============================================================
@@ -497,6 +595,197 @@ export class ReportesService {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
       total: await this.totalLineaSucursal(desde, hasta, depto, filtroTotal),
       items: items.map((i) => this.redondearObj(i)),
+    };
+  }
+
+  // ============================================================
+  // Reporte por SUCURSAL (lista + ficha) — nivel línea, scope por depto de la
+  // sucursal. Permite ver las sucursales de un generador (p. ej. los colegios
+  // de un proyecto) con su total y su desglose por material.
+  // ============================================================
+
+  /**
+   * Lista de sucursales con su actividad (entregas, kg, CO₂, Bs). Nivel línea:
+   * cada `detalle_transaccion` aporta a su sucursal. Bs = SUM(subtotal). Scope
+   * por `s.departamento_id`. Filtros: generador, tipo de generador, zona,
+   * búsqueda por nombre, e ids específicos.
+   */
+  async sucursales(query: ReporteSucursalesQueryDto, depto: number | null) {
+    const { desde, hasta } = this.rango(query);
+    const scope =
+      depto != null ? Prisma.sql`AND s.departamento_id = ${depto}` : Prisma.empty;
+
+    // Filtros: la mayoría referencian `s`; el tipo de generador en los items usa
+    // `tg`, y en el total (que sólo une sucursal) usa una subconsulta.
+    const condItems: Prisma.Sql[] = [];
+    const condTotal: Prisma.Sql[] = [];
+    const ambos = (c: Prisma.Sql) => {
+      condItems.push(c);
+      condTotal.push(c);
+    };
+    if (query.generador_id?.length)
+      ambos(Prisma.sql`s.generador_id IN (${Prisma.join(query.generador_id)})`);
+    if (query.zona_id?.length)
+      ambos(Prisma.sql`s.zona_id IN (${Prisma.join(query.zona_id)})`);
+    if (query.ids?.length)
+      ambos(Prisma.sql`s.id IN (${Prisma.join(query.ids)})`);
+    if (query.search)
+      ambos(Prisma.sql`s.nombre ILIKE ${'%' + query.search + '%'}`);
+    if (query.tipo_generador_id?.length) {
+      condItems.push(
+        Prisma.sql`tg.id IN (${Prisma.join(query.tipo_generador_id)})`,
+      );
+      condTotal.push(
+        Prisma.sql`s.generador_id IN (SELECT g2.id FROM generador g2 WHERE g2.tipo_generador_id IN (${Prisma.join(query.tipo_generador_id)}))`,
+      );
+    }
+    const filtroItems = condItems.length
+      ? Prisma.sql`AND ${Prisma.join(condItems, ' AND ')}`
+      : Prisma.empty;
+    const filtroTotal = condTotal.length
+      ? Prisma.sql`AND ${Prisma.join(condTotal, ' AND ')}`
+      : Prisma.empty;
+
+    const items = await this.prisma.$queryRaw<FilaSucursal[]>(Prisma.sql`
+      SELECT
+        s.id::int                              AS sucursal_id,
+        s.nombre                               AS sucursal,
+        g.razon_social                         AS generador,
+        tg.nombre                              AS tipo_generador,
+        ci.nombre                              AS ciudad,
+        COUNT(DISTINCT dt.transaccion_id)::int AS entregas,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg,
+        COALESCE(SUM(dt.subtotal), 0)::float   AS bs
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      JOIN sucursal s ON s.id = dt.sucursal_id
+      JOIN generador g ON g.id = s.generador_id
+      JOIN tipo_generador tg ON tg.id = g.tipo_generador_id
+      JOIN zona z ON z.id = s.zona_id
+      JOIN ciudad ci ON ci.id = z.ciudad_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE ${this.estados} AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope} ${filtroItems}
+      GROUP BY s.id, s.nombre, g.razon_social, tg.nombre, ci.nombre
+      ORDER BY kg DESC
+    `);
+
+    // Total nivel línea (transacciones DISTINCT + sumas). `sucursales` = nº de
+    // filas (cada fila es una sucursal única).
+    const totalLinea = await this.totalLineaSucursal(
+      desde,
+      hasta,
+      depto,
+      filtroTotal,
+    );
+    return {
+      rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
+      total: { sucursales: items.length, ...totalLinea },
+      items: items.map((i) => this.redondearObj(i)),
+    };
+  }
+
+  /**
+   * Ficha de UNA sucursal: datos + actividad real del período (total + desglose
+   * por material + lista de entregas). Es el "informe del colegio": qué se
+   * recolectó exactamente y en qué cantidad. Scope por depto (IDOR): si la
+   * sucursal es de otro depto, 404. No tiene "perfil declarado" (sucursal_material
+   * casi no se usa).
+   */
+  async sucursalDetalle(
+    id: number,
+    query: ReporteQueryDto,
+    depto: number | null,
+  ) {
+    const { desde, hasta } = this.rango(query);
+
+    const perfil = await this.prisma.sucursal.findFirst({
+      where: { id, ...(depto != null ? { departamento_id: depto } : {}) },
+      select: {
+        id: true,
+        nombre: true,
+        direccion: true,
+        horario_recojo: true,
+        generador: {
+          select: {
+            razon_social: true,
+            tipo_generador: { select: { nombre: true } },
+          },
+        },
+        zona: { select: { nombre: true, ciudad: { select: { nombre: true } } } },
+        departamento: { select: { nombre: true } },
+      },
+    });
+    if (!perfil) throw new NotFoundException('Sucursal no encontrada');
+
+    // Total de actividad real (nivel línea, acotado a esta sucursal).
+    const [total] = await this.prisma.$queryRaw<TotalLinea[]>(Prisma.sql`
+      SELECT
+        COUNT(DISTINCT dt.transaccion_id)::int AS transacciones,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg,
+        COALESCE(SUM(dt.subtotal), 0)::float AS bs
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE dt.sucursal_id = ${id} AND ${this.estados}
+        AND t.fecha BETWEEN ${desde} AND ${hasta}
+    `);
+
+    // Qué recolectó exactamente, por material (el desglose que pide el colegio).
+    const porMaterial = await this.prisma.$queryRaw<FilaDetalleMaterial[]>(Prisma.sql`
+      SELECT
+        COALESCE(m.id, 0)::int                AS material_id,
+        COALESCE(m.nombre, dt.nombre_personalizado, 'Otros (sin clasificar)') AS material,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM(dt.subtotal), 0)::float  AS bs,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE dt.sucursal_id = ${id} AND ${this.estados}
+        AND t.fecha BETWEEN ${desde} AND ${hasta}
+      GROUP BY COALESCE(m.id, 0), COALESCE(m.nombre, dt.nombre_personalizado, 'Otros (sin clasificar)')
+      ORDER BY kg DESC
+    `);
+
+    // Lista de entregas de esta sucursal (kg/bs atribuidos a sus líneas).
+    const entregas = await this.prisma.$queryRaw<FilaSucursalEntrega[]>(Prisma.sql`
+      SELECT
+        t.id::int          AS transaccion_id,
+        t.fecha            AS fecha,
+        t.estado::text     AS estado,
+        r.nombre_completo  AS recolector,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM(dt.subtotal), 0)::float       AS bs
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      LEFT JOIN recolector r ON r.id = t.recolector_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE dt.sucursal_id = ${id} AND ${this.estados}
+        AND t.fecha BETWEEN ${desde} AND ${hasta}
+      GROUP BY t.id, t.fecha, t.estado, r.nombre_completo
+      ORDER BY t.fecha DESC
+    `);
+
+    return {
+      rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
+      perfil: {
+        id: perfil.id,
+        nombre: perfil.nombre,
+        direccion: perfil.direccion,
+        horario: perfil.horario_recojo,
+        generador: perfil.generador.razon_social,
+        tipo_generador: perfil.generador.tipo_generador.nombre,
+        zona: perfil.zona?.nombre ?? null,
+        ciudad: perfil.zona?.ciudad?.nombre ?? null,
+        departamento: perfil.departamento?.nombre ?? null,
+      },
+      actividad: {
+        total: this.redondearObj(total),
+        por_material: porMaterial.map((m) => this.redondearObj(m)),
+        entregas: entregas.map((e) => this.redondearObj(e)),
+      },
     };
   }
 

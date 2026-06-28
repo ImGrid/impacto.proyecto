@@ -15,17 +15,22 @@ import {
   ReporteExportQueryDto,
   ReporteRecolectorasQueryDto,
   ReporteRecolectorasExportQueryDto,
+  ReporteNacionalExportQueryDto,
+  ReporteSucursalesQueryDto,
+  ReporteSucursalesExportQueryDto,
 } from './dto';
 import {
   construirExcelReporte,
   construirExcelMatriz,
   construirExcelRecolectora,
+  construirExcelSucursal,
   type ExcelColumna,
 } from './export/excel.util';
 import {
   construirPdfReporte,
   construirPdfMatriz,
   construirPdfRecolectora,
+  construirPdfSucursal,
   pdfNum,
   type PdfTipoCol,
   type PdfColumna,
@@ -100,6 +105,100 @@ export class ReportesController {
     @CurrentUser('departamento_activo') depto: number | null,
   ) {
     return this.reportesService.porAsociacion(query, depto);
+  }
+
+  // Reporte NACIONAL: comparación entre departamentos, SIN scope de depto.
+  // No lee `departamento_activo` a propósito → siempre muestra todo el país,
+  // disponible para cualquier admin (el @Roles(ADMIN) de la clase basta).
+  @Get('nacional')
+  nacional(@Query() query: ReporteQueryDto) {
+    return this.reportesService.nacional(query);
+  }
+
+  // Fecha del dato más antiguo: el calendario de los filtros llega hasta ahí (no
+  // a un año fijo). Abierto a cualquier admin, sin scope.
+  @Get('rango-fechas')
+  rangoFechas() {
+    return this.reportesService.rangoFechas();
+  }
+
+  // Export del nacional (Excel/PDF). `metrica` define qué grafica el PDF.
+  @Get('nacional/export')
+  async exportNacional(
+    @Query() query: ReporteNacionalExportQueryDto,
+    @Res() res: Response,
+  ) {
+    const data = await this.reportesService.nacional(query);
+    const cols: Col[] = [
+      { header: 'Departamento', key: 'departamento', width: 22, tipo: 'text' },
+      { header: 'Entregas', key: 'transacciones', width: 12, tipo: 'int' },
+      { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
+      { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
+    ];
+    const total = {
+      transacciones: data.total.transacciones,
+      kg: data.total.kg,
+      co2_kg: data.total.co2_kg,
+      bs: data.total.bs,
+    };
+    const conDatos = data.items.filter(
+      (i) => i.kg > 0 || i.bs > 0 || i.co2_kg > 0,
+    ).length;
+    // Default del nacional = todo el histórico (sin rango elegido).
+    const periodoLabel =
+      !query.desde && !query.hasta ? 'Todo el histórico' : undefined;
+
+    if (query.formato === 'pdf') {
+      // El gráfico grafica la métrica que el usuario tenía seleccionada (kg def).
+      const metrica = query.metrica ?? 'kg';
+      const META: Record<
+        'kg' | 'bs' | 'co2_kg',
+        { titulo: string; formato: 'kg' | 'bs' }
+      > = {
+        kg: { titulo: 'Recolectado por departamento (kg)', formato: 'kg' },
+        bs: { titulo: 'Generado por departamento (Bs)', formato: 'bs' },
+        co2_kg: { titulo: 'CO₂ evitado por departamento (kg)', formato: 'kg' },
+      };
+      const m = META[metrica];
+      const grafico =
+        query.graficos === false
+          ? undefined
+          : (svgBarras({
+              items: data.items.map((i) => ({
+                label: i.departamento,
+                value: i[metrica],
+              })),
+              formato: m.formato,
+              titulo: m.titulo,
+              minItems: 2,
+            }) ?? undefined);
+      const html = construirPdfReporte({
+        titulo: 'Comparación nacional',
+        periodo: data.rango,
+        periodoLabel,
+        kpis: [
+          { label: 'Departamentos con datos', value: pdfNum.ent(conDatos) },
+          { label: 'Recolectado', value: pdfNum.kg(data.total.kg) },
+          { label: 'CO₂ evitado', value: pdfNum.kg(data.total.co2_kg) },
+          { label: 'Generado', value: pdfNum.bs(data.total.bs) },
+        ],
+        columnas: aPdf(cols),
+        filas: data.items,
+        total,
+        grafico,
+      });
+      return this.enviarPdf(res, await this.pdf.render(html), 'reporte-nacional.pdf');
+    }
+    const buffer = await construirExcelReporte({
+      titulo: 'Comparación nacional',
+      periodo: data.rango,
+      periodoLabel,
+      columnas: aExcel(cols),
+      filas: data.items,
+      total,
+    });
+    this.enviarExcel(res, buffer, 'reporte-nacional.xlsx');
   }
 
   // ============================================================
@@ -690,5 +789,116 @@ export class ReportesController {
     @CurrentUser('departamento_activo') depto: number | null,
   ) {
     return this.reportesService.recolectoraDetalle(id, query, depto);
+  }
+
+  // --- Reporte por sucursal (lista + ficha) ---
+
+  @Get('sucursales')
+  sucursales(
+    @Query() query: ReporteSucursalesQueryDto,
+    @CurrentUser('departamento_activo') depto: number | null,
+  ) {
+    return this.reportesService.sucursales(query, depto);
+  }
+
+  // Export de la LISTA de sucursales (estático antes de `sucursales/:id`).
+  @Get('sucursales/export')
+  async exportSucursales(
+    @Query() query: ReporteSucursalesExportQueryDto,
+    @CurrentUser('departamento_activo') depto: number | null,
+    @Res() res: Response,
+  ) {
+    const data = await this.reportesService.sucursales(query, depto);
+    const cols: Col[] = [
+      { header: 'Sucursal', key: 'sucursal', width: 28, tipo: 'text' },
+      { header: 'Generador', key: 'generador', width: 24, tipo: 'text' },
+      { header: 'Tipo', key: 'tipo_generador', width: 16, tipo: 'text' },
+      { header: 'Ciudad', key: 'ciudad', width: 16, tipo: 'text' },
+      { header: 'Entregas', key: 'entregas', width: 12, tipo: 'int' },
+      { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
+      { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
+    ];
+    const total = {
+      entregas: data.total.transacciones,
+      kg: data.total.kg,
+      co2_kg: data.total.co2_kg,
+      bs: data.total.bs,
+    };
+    if (query.formato === 'pdf') {
+      const html = construirPdfReporte({
+        titulo: 'Recolección por sucursal',
+        periodo: data.rango,
+        kpis: [
+          { label: 'Sucursales', value: pdfNum.ent(data.total.sucursales) },
+          { label: 'Entregas', value: pdfNum.ent(data.total.transacciones) },
+          { label: 'Recolectado', value: pdfNum.kg(data.total.kg) },
+          { label: 'CO₂ evitado', value: pdfNum.kg(data.total.co2_kg) },
+          { label: 'Generado', value: pdfNum.bs(data.total.bs) },
+        ],
+        columnas: aPdf(cols),
+        filas: data.items,
+        total,
+        grafico:
+          query.graficos === false
+            ? undefined
+            : (svgBarras({
+                items: data.items.map((i) => ({
+                  label: i.sucursal,
+                  value: i.kg,
+                })),
+                formato: 'kg',
+                titulo: 'Recolectado por sucursal (kg)',
+              }) ?? undefined),
+      });
+      // Horizontal: muchas columnas (sucursal + generador + tipo + ciudad + …).
+      return this.enviarPdf(
+        res,
+        await this.pdf.render(html, { landscape: true }),
+        'reporte-por-sucursal.pdf',
+      );
+    }
+    const buffer = await construirExcelReporte({
+      titulo: 'Recolección por sucursal',
+      periodo: data.rango,
+      columnas: aExcel(cols),
+      filas: data.items,
+      total,
+    });
+    this.enviarExcel(res, buffer, 'reporte-por-sucursal.xlsx');
+  }
+
+  // Ficha de UNA sucursal (datos + actividad real + desglose por material).
+  @Get('sucursales/:id/export')
+  async exportSucursal(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ReporteExportQueryDto,
+    @CurrentUser('departamento_activo') depto: number | null,
+    @Res() res: Response,
+  ) {
+    const d = await this.reportesService.sucursalDetalle(id, query, depto);
+    if (query.formato === 'pdf') {
+      const html = construirPdfSucursal({
+        periodo: d.rango,
+        perfil: d.perfil,
+        actividad: d.actividad,
+      });
+      return this.enviarPdf(res, await this.pdf.render(html), `ficha-sucursal-${id}.pdf`);
+    }
+    const buffer = await construirExcelSucursal({
+      periodo: d.rango,
+      perfil: d.perfil,
+      actividad: d.actividad,
+    });
+    this.enviarExcel(res, buffer, `ficha-sucursal-${id}.xlsx`);
+  }
+
+  @Get('sucursales/:id')
+  sucursalDetalle(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ReporteQueryDto,
+    @CurrentUser('departamento_activo') depto: number | null,
+  ) {
+    return this.reportesService.sucursalDetalle(id, query, depto);
   }
 }

@@ -30,3 +30,16 @@ export function useReporte<T>(
     enabled: options?.enabled ?? true,
   });
 }
+
+/**
+ * Fecha del dato más antiguo (para acotar el límite inferior del calendario de
+ * los filtros). Se cachea 1h: el dato más viejo casi no cambia. Sin scope por
+ * depto (el rango del calendario es el mismo para todos).
+ */
+export function useRangoFechas() {
+  return useQuery({
+    queryKey: ["reporte-rango-fechas"],
+    queryFn: () => clientGet<{ min: string | null }>("/reportes/rango-fechas"),
+    staleTime: 60 * 60 * 1000,
+  });
+}

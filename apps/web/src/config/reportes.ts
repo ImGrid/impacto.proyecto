@@ -7,6 +7,8 @@ import {
   LayoutGrid,
   ArrowRightLeft,
   Building2,
+  Store,
+  Globe,
   type LucideIcon,
 } from "lucide-react";
 
@@ -16,7 +18,7 @@ import {
  * validado en docs/28 (tarjetas consistentes, "information scent", flujo
  * elegir → detalle).
  */
-export type ReporteCategoria = "Social" | "Operación y volumen";
+export type ReporteCategoria = "Nacional" | "Social" | "Operación y volumen";
 
 export type ReporteMeta = {
   id: string;
@@ -28,6 +30,16 @@ export type ReporteMeta = {
 };
 
 export const reportes: ReporteMeta[] = [
+  // --- Nacional ---
+  {
+    id: "nacional",
+    title: "Comparación nacional",
+    descripcion:
+      "Compara cuánto recolectó, generó (Bs) y evitó en CO₂ cada departamento.",
+    href: "/reportes/nacional",
+    icon: Globe,
+    categoria: "Nacional",
+  },
   // --- Social ---
   {
     id: "por-asociacion",
@@ -95,9 +107,19 @@ export const reportes: ReporteMeta[] = [
     icon: Building2,
     categoria: "Operación y volumen",
   },
+  {
+    id: "sucursales",
+    title: "Por sucursal",
+    descripcion:
+      "Cuánto entregó cada sucursal (p. ej. cada colegio) y el desglose por material.",
+    href: "/reportes/sucursales",
+    icon: Store,
+    categoria: "Operación y volumen",
+  },
 ];
 
 export const reporteCategorias: ReporteCategoria[] = [
+  "Nacional",
   "Social",
   "Operación y volumen",
 ];

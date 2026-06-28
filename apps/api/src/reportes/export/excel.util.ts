@@ -36,6 +36,8 @@ export async function construirExcelReporte(opts: {
   total?: Record<string, unknown>;
   totalLabel?: string;
   nombreHoja?: string;
+  /** Texto del período si no es un rango de fechas (p. ej. "Todo el histórico"). */
+  periodoLabel?: string;
 }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Triple Impacto';
@@ -64,7 +66,9 @@ export async function construirExcelReporte(opts: {
   // Fila 2: subtítulo (período).
   ws.mergeCells(2, 1, 2, ncols);
   const sub = ws.getCell(2, 1);
-  sub.value = `Período: ${opts.periodo.desde.slice(0, 10)} a ${opts.periodo.hasta.slice(0, 10)}`;
+  sub.value = opts.periodoLabel
+    ? `Período: ${opts.periodoLabel}`
+    : `Período: ${opts.periodo.desde.slice(0, 10)} a ${opts.periodo.hasta.slice(0, 10)}`;
   sub.font = { name: 'Calibri', size: 10, color: { argb: 'FF666666' } };
   ws.getRow(2).height = 16;
 
@@ -359,6 +363,120 @@ export async function construirExcelRecolectora(opts: {
       ws.getCell(r, 2).value = t.destino;
       ws.getCell(r, 3).value = `${nfBO(t.kg)} kg`;
       ws.getCell(r, 4).value = `Bs ${nfBO(t.bs)}`;
+      r++;
+    }
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+/**
+ * Excel "ficha" de UNA sucursal: datos + actividad real (total + desglose por
+ * material + entregas). Es el informe que recibe el generador/colegio. No tiene
+ * "perfil declarado" (sucursal_material casi no se usa). Sanea los textos libres.
+ */
+export async function construirExcelSucursal(opts: {
+  periodo: { desde: string; hasta: string };
+  perfil: {
+    nombre: string;
+    direccion: string;
+    horario: string | null;
+    generador: string;
+    tipo_generador: string;
+    zona: string | null;
+    ciudad: string | null;
+    departamento: string | null;
+  };
+  actividad: {
+    total: { transacciones: number; kg: number; co2_kg: number; bs: number };
+    por_material: { material: string; kg: number; bs: number }[];
+    entregas: {
+      fecha: Date | string;
+      recolector: string | null;
+      kg: number;
+      bs: number;
+    }[];
+  };
+}): Promise<Buffer> {
+  const { perfil, actividad } = opts;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Triple Impacto';
+  wb.created = new Date();
+  const ws = wb.addWorksheet('Ficha');
+  ws.getColumn(1).width = 22;
+  ws.getColumn(2).width = 28;
+  ws.getColumn(3).width = 16;
+  ws.getColumn(4).width = 16;
+
+  let r = 1;
+  const seccion = (titulo: string) => {
+    ws.mergeCells(r, 1, r, 4);
+    const c = ws.getCell(r, 1);
+    c.value = titulo;
+    c.font = { name: 'Calibri', bold: true, size: 12, color: { argb: TEAL } };
+    r++;
+  };
+  const dato = (label: string, value: string) => {
+    ws.getCell(r, 1).value = label;
+    ws.getCell(r, 1).font = { name: 'Calibri', color: { argb: 'FF666666' } };
+    ws.mergeCells(r, 2, r, 4);
+    ws.getCell(r, 2).value = sanearTexto(value) as ExcelJS.CellValue;
+    r++;
+  };
+
+  // Título.
+  ws.mergeCells(r, 1, r, 4);
+  ws.getCell(r, 1).value = `Sucursal · ${perfil.nombre}`;
+  ws.getCell(r, 1).font = { name: 'Calibri', bold: true, size: 14, color: { argb: TEAL } };
+  r++;
+  ws.mergeCells(r, 1, r, 4);
+  ws.getCell(r, 1).value = `Período: ${opts.periodo.desde.slice(0, 10)} a ${opts.periodo.hasta.slice(0, 10)}`;
+  ws.getCell(r, 1).font = { name: 'Calibri', size: 10, color: { argb: 'FF666666' } };
+  r += 2;
+
+  seccion('Datos');
+  dato('Generador', perfil.generador);
+  dato('Tipo', perfil.tipo_generador);
+  dato('Dirección', perfil.direccion);
+  dato('Zona', perfil.zona ?? '—');
+  dato('Ciudad', perfil.ciudad ?? '—');
+  dato('Departamento', perfil.departamento ?? '—');
+  if (perfil.horario) dato('Horario', perfil.horario);
+  r++;
+
+  seccion('Actividad real (lo que recolectó en el período)');
+  dato('Entregas', nfBO(actividad.total.transacciones, 0));
+  dato('Recolectado', `${nfBO(actividad.total.kg)} kg`);
+  dato('CO₂ evitado', `${nfBO(actividad.total.co2_kg)} kg`);
+  dato('Generado', `Bs ${nfBO(actividad.total.bs)}`);
+  r++;
+
+  if (actividad.por_material.length) {
+    miniHeader(ws, r, ['Qué recolectó', 'Recolectado', 'Generado', '']);
+    r++;
+    for (const m of actividad.por_material) {
+      ws.getCell(r, 1).value = sanearTexto(m.material) as ExcelJS.CellValue;
+      ws.getCell(r, 2).value = `${nfBO(m.kg)} kg`;
+      ws.getCell(r, 3).value = `Bs ${nfBO(m.bs)}`;
+      r++;
+    }
+    r++;
+  }
+
+  if (actividad.entregas.length) {
+    miniHeader(ws, r, ['Fecha', 'Recolector', 'Recolectado', 'Generado']);
+    r++;
+    for (const e of actividad.entregas) {
+      ws.getCell(r, 1).value = new Date(e.fecha).toLocaleDateString('es-BO', {
+        timeZone: 'UTC',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      ws.getCell(r, 2).value = sanearTexto(e.recolector ?? '—') as ExcelJS.CellValue;
+      ws.getCell(r, 3).value = `${nfBO(e.kg)} kg`;
+      ws.getCell(r, 4).value = `Bs ${nfBO(e.bs)}`;
       r++;
     }
   }
