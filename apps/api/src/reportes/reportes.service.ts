@@ -101,6 +101,31 @@ type FilaSucursalEntrega = {
   kg: number;
   bs: number;
 };
+/** Fila del resumen agregado POR SUCURSAL dentro de la ficha de un generador. */
+type FilaGeneradorSucursal = {
+  sucursal_id: number;
+  sucursal: string;
+  ciudad: string;
+  entregas: number;
+  kg: number;
+  co2_kg: number;
+  bs: number;
+};
+/**
+ * Fila de la lista de entregas de la ficha de un generador: UNA por transacción
+ * (kg/bs = solo las líneas de ESTE generador). `sucursales`/`sucursales_nombres`
+ * describen de qué sucursal(es) del generador vino el material en esa entrega.
+ */
+type FilaGeneradorEntrega = {
+  transaccion_id: number;
+  fecha: Date;
+  estado: string;
+  recolector: string | null;
+  sucursales: number;
+  sucursales_nombres: string | null;
+  kg: number;
+  bs: number;
+};
 type TotalLinea = {
   transacciones: number;
   kg: number;
@@ -447,6 +472,175 @@ export class ReportesService {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
       total: this.redondearObj(total),
       items: items.map((i) => this.redondearObj(i)),
+    };
+  }
+
+  /**
+   * Ficha de UN generador (drill-through del reporte por generador): perfil +
+   * actividad real agregada de TODAS sus sucursales del período.
+   *
+   * Estructura EN CAPAS para no doble-contar. Verificado en BD que una entrega
+   * puede traer material de VARIAS sucursales del mismo generador (una entrega
+   * de Banco Bisa toca hasta 4 de sus sucursales). Por eso:
+   *   - `total` (KPIs) y `entregas` (una fila por transacción) son a NIVEL
+   *     TRANSACCIÓN → `COUNT(DISTINCT transaccion_id)` es el conteo REAL de
+   *     entregas y reconcilia con la fila del reporte por generador.
+   *   - `por_sucursal` es un resumen AGREGADO por sucursal (una entrega
+   *     multi-sucursal aporta a cada una): útil para "cuánto vino de cada
+   *     sucursal", pero su columna de entregas NO es sumable con la de otras
+   *     (por eso vive en su propia tabla, no anidando entregas bajo sucursales).
+   *
+   * Bs = SUM(subtotal) por línea (no `monto_total`, que es de toda la
+   * transacción). Scope por el depto de la sucursal. IDOR: el generador no tiene
+   * departamento propio → se exige que tenga al menos una sucursal en el depto
+   * activo; si no, 404 (igual criterio de aislamiento que `sucursalDetalle`).
+   */
+  async generadorDetalle(
+    id: number,
+    query: ReporteQueryDto,
+    depto: number | null,
+  ) {
+    const { desde, hasta } = this.rango(query);
+    const scope =
+      depto != null ? Prisma.sql`AND s.departamento_id = ${depto}` : Prisma.empty;
+
+    const perfil = await this.prisma.generador.findFirst({
+      where: {
+        id,
+        ...(depto != null
+          ? { sucursal: { some: { departamento_id: depto } } }
+          : {}),
+      },
+      select: {
+        id: true,
+        razon_social: true,
+        contacto_nombre: true,
+        contacto_telefono: true,
+        contacto_email: true,
+        tipo_generador: { select: { nombre: true } },
+        sucursal: {
+          where: depto != null ? { departamento_id: depto } : {},
+          select: { departamento: { select: { nombre: true } } },
+        },
+      },
+    });
+    if (!perfil) throw new NotFoundException('Generador no encontrado');
+
+    // Departamentos donde el generador tiene sucursales (dentro del scope).
+    const departamentos = [
+      ...new Set(
+        perfil.sucursal
+          .map((s) => s.departamento?.nombre)
+          .filter((n): n is string => n != null),
+      ),
+    ];
+
+    // Total atribuido al generador (nivel línea, DISTINCT de transacciones).
+    // `sucursales` = nº de sucursales con movimiento (espeja la columna del
+    // reporte por generador).
+    const [total] = await this.prisma.$queryRaw<
+      {
+        sucursales: number;
+        transacciones: number;
+        kg: number;
+        co2_kg: number;
+        bs: number;
+      }[]
+    >(Prisma.sql`
+      SELECT
+        COUNT(DISTINCT s.id)::int              AS sucursales,
+        COUNT(DISTINCT dt.transaccion_id)::int AS transacciones,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg,
+        COALESCE(SUM(dt.subtotal), 0)::float   AS bs
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      JOIN sucursal s ON s.id = dt.sucursal_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE s.generador_id = ${id} AND ${this.estados}
+        AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+    `);
+
+    // Tabla 1: resumen agregado por sucursal (solo las que tuvieron movimiento).
+    const porSucursal = await this.prisma.$queryRaw<FilaGeneradorSucursal[]>(Prisma.sql`
+      SELECT
+        s.id::int                              AS sucursal_id,
+        s.nombre                               AS sucursal,
+        ci.nombre                              AS ciudad,
+        COUNT(DISTINCT dt.transaccion_id)::int AS entregas,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg,
+        COALESCE(SUM(dt.subtotal), 0)::float   AS bs
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      JOIN sucursal s ON s.id = dt.sucursal_id
+      JOIN zona z ON z.id = s.zona_id
+      JOIN ciudad ci ON ci.id = z.ciudad_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE s.generador_id = ${id} AND ${this.estados}
+        AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      GROUP BY s.id, s.nombre, ci.nombre
+      ORDER BY kg DESC
+    `);
+
+    // Tabla 2: desglose por material (incluye "Otro" por nombre_personalizado).
+    const porMaterial = await this.prisma.$queryRaw<FilaDetalleMaterial[]>(Prisma.sql`
+      SELECT
+        COALESCE(m.id, 0)::int                AS material_id,
+        COALESCE(m.nombre, dt.nombre_personalizado, 'Otros (sin clasificar)') AS material,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM(dt.subtotal), 0)::float  AS bs,
+        COALESCE(SUM((${this.pesoKgSql}) * COALESCE(m.factor_co2, 0)), 0)::float AS co2_kg
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      JOIN sucursal s ON s.id = dt.sucursal_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE s.generador_id = ${id} AND ${this.estados}
+        AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      GROUP BY COALESCE(m.id, 0), COALESCE(m.nombre, dt.nombre_personalizado, 'Otros (sin clasificar)')
+      ORDER BY kg DESC
+    `);
+
+    // Tabla 3: entregas, UNA fila por transacción. kg/bs son solo las líneas de
+    // ESTE generador; `sucursales_nombres` dice de qué sucursal(es) vinieron.
+    const entregas = await this.prisma.$queryRaw<FilaGeneradorEntrega[]>(Prisma.sql`
+      SELECT
+        t.id::int                              AS transaccion_id,
+        t.fecha                                AS fecha,
+        t.estado::text                         AS estado,
+        r.nombre_completo                      AS recolector,
+        COUNT(DISTINCT s.id)::int              AS sucursales,
+        STRING_AGG(DISTINCT s.nombre, ', ')    AS sucursales_nombres,
+        COALESCE(SUM(${this.pesoKgSql}), 0)::float AS kg,
+        COALESCE(SUM(dt.subtotal), 0)::float       AS bs
+      FROM detalle_transaccion dt
+      JOIN transaccion t ON t.id = dt.transaccion_id
+      JOIN sucursal s ON s.id = dt.sucursal_id
+      LEFT JOIN recolector r ON r.id = t.recolector_id
+      LEFT JOIN material m ON m.id = dt.material_id
+      WHERE s.generador_id = ${id} AND ${this.estados}
+        AND t.fecha BETWEEN ${desde} AND ${hasta} ${scope}
+      GROUP BY t.id, t.fecha, t.estado, r.nombre_completo
+      ORDER BY t.fecha DESC
+    `);
+
+    return {
+      rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
+      perfil: {
+        id: perfil.id,
+        nombre: perfil.razon_social,
+        tipo_generador: perfil.tipo_generador?.nombre ?? null,
+        contacto_nombre: perfil.contacto_nombre,
+        contacto_telefono: perfil.contacto_telefono,
+        contacto_email: perfil.contacto_email,
+        departamentos,
+      },
+      actividad: {
+        total: this.redondearObj(total),
+        por_sucursal: porSucursal.map((s) => this.redondearObj(s)),
+        por_material: porMaterial.map((mm) => this.redondearObj(mm)),
+        entregas: entregas.map((e) => this.redondearObj(e)),
+      },
     };
   }
 

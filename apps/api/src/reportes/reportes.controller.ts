@@ -24,6 +24,7 @@ import {
   construirExcelMatriz,
   construirExcelRecolectora,
   construirExcelSucursal,
+  construirExcelGenerador,
   type ExcelColumna,
 } from './export/excel.util';
 import {
@@ -31,6 +32,7 @@ import {
   construirPdfMatriz,
   construirPdfRecolectora,
   construirPdfSucursal,
+  construirPdfGenerador,
   pdfNum,
   type PdfTipoCol,
   type PdfColumna,
@@ -503,6 +505,37 @@ export class ReportesController {
     this.enviarExcel(res, buffer, 'reporte-por-generador.xlsx');
   }
 
+  // Export de la FICHA de un generador (estático `:id/export`, declarado antes
+  // de `por-generador/:id` para que gane al patrón).
+  @Get('por-generador/:id/export')
+  async exportGenerador(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ReporteExportQueryDto,
+    @CurrentUser('departamento_activo') depto: number | null,
+    @Res() res: Response,
+  ) {
+    const d = await this.reportesService.generadorDetalle(id, query, depto);
+    if (query.formato === 'pdf') {
+      const html = construirPdfGenerador({
+        periodo: d.rango,
+        perfil: d.perfil,
+        actividad: d.actividad,
+      });
+      // Portrait como las demás fichas; las tablas (6 col. máx) caben.
+      return this.enviarPdf(
+        res,
+        await this.pdf.render(html),
+        `ficha-generador-${id}.pdf`,
+      );
+    }
+    const buffer = await construirExcelGenerador({
+      periodo: d.rango,
+      perfil: d.perfil,
+      actividad: d.actividad,
+    });
+    this.enviarExcel(res, buffer, `ficha-generador-${id}.xlsx`);
+  }
+
   @Get('por-tipo-generador/export')
   async exportPorTipoGenerador(
     @Query() query: ReporteExportQueryDto,
@@ -746,6 +779,17 @@ export class ReportesController {
     @CurrentUser('departamento_activo') depto: number | null,
   ) {
     return this.reportesService.porGenerador(query, depto);
+  }
+
+  // Ficha de UN generador (drill-through). Declarado DESPUÉS de
+  // `por-generador/export` para que la ruta estática gane al patrón `:id`.
+  @Get('por-generador/:id')
+  generadorDetalle(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: ReporteQueryDto,
+    @CurrentUser('departamento_activo') depto: number | null,
+  ) {
+    return this.reportesService.generadorDetalle(id, query, depto);
   }
 
   @Get('por-material')

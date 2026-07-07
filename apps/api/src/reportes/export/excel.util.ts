@@ -485,6 +485,164 @@ export async function construirExcelSucursal(opts: {
   return Buffer.from(buf);
 }
 
+/**
+ * Excel "ficha" de UN generador: datos + actividad agregada de sus sucursales.
+ * En CAPAS (igual que el PDF): KPIs + "Entregas" a nivel transacción (conteo
+ * exacto) y "Resumen por sucursal" agregado aparte (con la nota de que una
+ * entrega multi-sucursal cuenta en cada una). Números pre-formateados es-BO.
+ */
+export async function construirExcelGenerador(opts: {
+  periodo: { desde: string; hasta: string };
+  perfil: {
+    nombre: string;
+    tipo_generador: string | null;
+    contacto_nombre: string | null;
+    contacto_telefono: string | null;
+    contacto_email: string | null;
+    departamentos: string[];
+  };
+  actividad: {
+    total: {
+      sucursales: number;
+      transacciones: number;
+      kg: number;
+      co2_kg: number;
+      bs: number;
+    };
+    por_sucursal: {
+      sucursal: string;
+      ciudad: string;
+      entregas: number;
+      kg: number;
+      co2_kg: number;
+      bs: number;
+    }[];
+    por_material: { material: string; kg: number; bs: number }[];
+    entregas: {
+      fecha: Date | string;
+      recolector: string | null;
+      sucursales: number;
+      sucursales_nombres: string | null;
+      kg: number;
+      bs: number;
+    }[];
+  };
+}): Promise<Buffer> {
+  const { perfil, actividad } = opts;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Triple Impacto';
+  wb.created = new Date();
+  const ws = wb.addWorksheet('Ficha');
+  ws.getColumn(1).width = 26;
+  ws.getColumn(2).width = 22;
+  ws.getColumn(3).width = 14;
+  ws.getColumn(4).width = 16;
+  ws.getColumn(5).width = 16;
+  ws.getColumn(6).width = 16;
+
+  let r = 1;
+  const seccion = (titulo: string) => {
+    ws.mergeCells(r, 1, r, 6);
+    const c = ws.getCell(r, 1);
+    c.value = titulo;
+    c.font = { name: 'Calibri', bold: true, size: 12, color: { argb: TEAL } };
+    r++;
+  };
+  const dato = (label: string, value: string) => {
+    ws.getCell(r, 1).value = label;
+    ws.getCell(r, 1).font = { name: 'Calibri', color: { argb: 'FF666666' } };
+    ws.mergeCells(r, 2, r, 6);
+    ws.getCell(r, 2).value = sanearTexto(value) as ExcelJS.CellValue;
+    r++;
+  };
+
+  // Título.
+  ws.mergeCells(r, 1, r, 6);
+  ws.getCell(r, 1).value = `Generador · ${perfil.nombre}`;
+  ws.getCell(r, 1).font = { name: 'Calibri', bold: true, size: 14, color: { argb: TEAL } };
+  r++;
+  ws.mergeCells(r, 1, r, 6);
+  ws.getCell(r, 1).value = `Período: ${opts.periodo.desde.slice(0, 10)} a ${opts.periodo.hasta.slice(0, 10)}`;
+  ws.getCell(r, 1).font = { name: 'Calibri', size: 10, color: { argb: 'FF666666' } };
+  r += 2;
+
+  seccion('Datos');
+  dato('Tipo', perfil.tipo_generador ?? '—');
+  dato(
+    'Departamento(s)',
+    perfil.departamentos.length ? perfil.departamentos.join(', ') : '—',
+  );
+  if (perfil.contacto_nombre) dato('Contacto', perfil.contacto_nombre);
+  if (perfil.contacto_telefono) dato('Teléfono', perfil.contacto_telefono);
+  if (perfil.contacto_email) dato('Email', perfil.contacto_email);
+  r++;
+
+  seccion('Actividad real (lo que aportaron sus sucursales en el período)');
+  dato('Sucursales', nfBO(actividad.total.sucursales, 0));
+  dato('Entregas', nfBO(actividad.total.transacciones, 0));
+  dato('Recolectado', `${nfBO(actividad.total.kg)} kg`);
+  dato('CO₂ evitado', `${nfBO(actividad.total.co2_kg)} kg`);
+  dato('Generado', `Bs ${nfBO(actividad.total.bs)}`);
+  r++;
+
+  if (actividad.por_sucursal.length) {
+    miniHeader(ws, r, ['Sucursal', 'Ciudad', 'Recolectado', 'Generado', '', '']);
+    r++;
+    for (const s of actividad.por_sucursal) {
+      ws.getCell(r, 1).value = sanearTexto(s.sucursal) as ExcelJS.CellValue;
+      ws.getCell(r, 2).value = sanearTexto(s.ciudad) as ExcelJS.CellValue;
+      ws.getCell(r, 3).value = `${nfBO(s.kg)} kg`;
+      ws.getCell(r, 4).value = `Bs ${nfBO(s.bs)}`;
+      r++;
+    }
+    r++;
+  }
+
+  if (actividad.por_material.length) {
+    miniHeader(ws, r, ['Material', 'Recolectado', 'Generado', '', '', '']);
+    r++;
+    for (const m of actividad.por_material) {
+      ws.getCell(r, 1).value = sanearTexto(m.material) as ExcelJS.CellValue;
+      ws.getCell(r, 2).value = `${nfBO(m.kg)} kg`;
+      ws.getCell(r, 3).value = `Bs ${nfBO(m.bs)}`;
+      r++;
+    }
+    r++;
+  }
+
+  if (actividad.entregas.length) {
+    miniHeader(ws, r, [
+      'Fecha',
+      'Recolector',
+      'Origen',
+      'Recolectado',
+      'Generado',
+      '',
+    ]);
+    r++;
+    for (const e of actividad.entregas) {
+      ws.getCell(r, 1).value = new Date(e.fecha).toLocaleDateString('es-BO', {
+        timeZone: 'UTC',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      ws.getCell(r, 2).value = sanearTexto(
+        e.recolector ?? '—',
+      ) as ExcelJS.CellValue;
+      ws.getCell(r, 3).value = sanearTexto(
+        e.sucursales_nombres ?? '—',
+      ) as ExcelJS.CellValue;
+      ws.getCell(r, 4).value = `${nfBO(e.kg)} kg`;
+      ws.getCell(r, 5).value = `Bs ${nfBO(e.bs)}`;
+      r++;
+    }
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
 function diaTitulo(s: string) {
   return s.charAt(0) + s.slice(1).toLowerCase();
 }

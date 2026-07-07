@@ -97,6 +97,57 @@ export type ReportePorGenerador = {
   }[];
 };
 
+// Ficha (drill-through) de UN generador: perfil + actividad agregada de sus
+// sucursales. Estructura en capas (KPIs/entregas a nivel transacción; resumen
+// por sucursal agregado aparte).
+export type ReporteGeneradorDetalle = {
+  rango: ReporteRango;
+  perfil: {
+    id: number;
+    nombre: string;
+    tipo_generador: string | null;
+    contacto_nombre: string | null;
+    contacto_telefono: string | null;
+    contacto_email: string | null;
+    departamentos: string[];
+  };
+  actividad: {
+    total: {
+      sucursales: number;
+      transacciones: number;
+      kg: number;
+      co2_kg: number;
+      bs: number;
+    };
+    por_sucursal: {
+      sucursal_id: number;
+      sucursal: string;
+      ciudad: string;
+      entregas: number;
+      kg: number;
+      co2_kg: number;
+      bs: number;
+    }[];
+    por_material: {
+      material_id: number;
+      material: string;
+      kg: number;
+      bs: number;
+      co2_kg: number;
+    }[];
+    entregas: {
+      transaccion_id: number;
+      fecha: string;
+      estado: string;
+      recolector: string | null;
+      sucursales: number;
+      sucursales_nombres: string | null;
+      kg: number;
+      bs: number;
+    }[];
+  };
+};
+
 export type ReportePorTipoGenerador = {
   rango: ReporteRango;
   total: TotalLinea;

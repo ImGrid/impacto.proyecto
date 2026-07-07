@@ -2,6 +2,14 @@
 
 import { useState } from "react";
 import { Recycle, Wallet, Leaf, Building2, Store } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useReporte } from "@/hooks/use-reportes";
 import type { ReportePorGenerador } from "@/types/reportes";
 import { type MultiOption } from "@/components/shared/multi-select";
@@ -12,32 +20,12 @@ import {
   type Periodo,
 } from "../_components/reporte-periodo-filtro";
 import { ReporteResumen } from "../_components/reporte-resumen";
-import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
+import { fmt } from "../_components/format";
 import { ReporteFiltroExtra } from "../_components/reporte-filtro-extra";
 import { RankingChart } from "../../estadisticas/_components/ranking-chart";
+import { GeneradorDetalleDialog } from "./_components/generador-detalle-dialog";
 
 type Filtros = Periodo & { generador_id?: number[] };
-
-type Fila = {
-  generador_id: number;
-  generador: string;
-  tipo_generador: string;
-  sucursales: number;
-  transacciones: number;
-  kg: number;
-  co2_kg: number;
-  bs: number;
-};
-
-const columnas: ReporteColumna<Fila>[] = [
-  { key: "generador", header: "Generador", format: "text" },
-  { key: "tipo_generador", header: "Tipo", format: "text" },
-  { key: "sucursales", header: "Sucursales", format: "int", align: "right" },
-  { key: "transacciones", header: "Entregas", format: "int", align: "right" },
-  { key: "kg", header: "Recolectado", format: "kg", align: "right" },
-  { key: "co2_kg", header: "CO₂ evitado", format: "co2", align: "right" },
-  { key: "bs", header: "Generado", format: "bs", align: "right" },
-];
 
 export default function PorGeneradorPage() {
   const [filtros, setFiltros] = useState<Filtros>({});
@@ -51,15 +39,20 @@ export default function PorGeneradorPage() {
     label: g.razon_social,
   }));
 
-  const rows: Fila[] = (data?.items ?? []).map((g) => ({
-    ...g,
-    tipo_generador: g.tipo_generador ?? "—",
-  }));
+  // Drill-through a la ficha de un generador.
+  const [detalleId, setDetalleId] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const abrir = (id: number) => {
+    setDetalleId(id);
+    setOpen(true);
+  };
+
+  const items = data?.items ?? [];
 
   return (
     <ReporteShell
       title="Cantidad por generador"
-      description="Cuánto aportó cada empresa generadora a través de sus sucursales. Puedes acotar a ciertos generadores."
+      description="Cuánto aportó cada empresa generadora a través de sus sucursales. Haz clic en un generador para ver sus sucursales y entregas."
       exportar={{ endpoint: "por-generador", filtros }}
       graficables
     >
@@ -88,32 +81,72 @@ export default function PorGeneradorPage() {
         ]}
       />
 
-      {rows.length > 0 && (
+      {items.length > 0 && (
         <RankingChart
           title="Kilos por generador"
-          description="Volumen aportado por cada empresa generadora en el período"
-          items={rows.map((g) => ({
+          description="Volumen aportado por cada empresa generadora (haz clic en una barra para ver su detalle)"
+          items={items.map((g) => ({
             id: g.generador_id,
             label: g.generador,
             kg: g.kg,
           }))}
+          onItemClick={abrir}
         />
       )}
 
-      <ReporteTabla
-        columns={columnas}
-        rows={rows}
-        total={
-          data
-            ? {
-                sucursales: data.total.sucursales,
-                transacciones: data.total.transacciones,
-                kg: data.total.kg,
-                co2_kg: data.total.co2_kg,
-                bs: data.total.bs,
-              }
-            : undefined
-        }
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Generador</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead className="text-right">Sucursales</TableHead>
+              <TableHead className="text-right">Entregas</TableHead>
+              <TableHead className="text-right">Recolectado</TableHead>
+              <TableHead className="text-right">CO₂ evitado</TableHead>
+              <TableHead className="text-right">Generado</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="text-muted-foreground py-10 text-center text-sm"
+                >
+                  No hay generadores con actividad en el período.
+                </TableCell>
+              </TableRow>
+            ) : (
+              items.map((g) => (
+                <TableRow key={g.generador_id}>
+                  <TableCell>
+                    <button
+                      type="button"
+                      onClick={() => abrir(g.generador_id)}
+                      className="text-primary text-left font-medium hover:underline"
+                    >
+                      {g.generador}
+                    </button>
+                  </TableCell>
+                  <TableCell>{g.tipo_generador ?? "—"}</TableCell>
+                  <TableCell className="text-right tabular-nums">{g.sucursales}</TableCell>
+                  <TableCell className="text-right tabular-nums">{g.transacciones}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(g.kg, "kg")}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(g.co2_kg, "co2")}</TableCell>
+                  <TableCell className="text-right tabular-nums">{fmt(g.bs, "bs")}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      <GeneradorDetalleDialog
+        id={detalleId}
+        periodo={{ desde: filtros.desde, hasta: filtros.hasta }}
+        open={open}
+        onOpenChange={setOpen}
       />
     </ReporteShell>
   );
