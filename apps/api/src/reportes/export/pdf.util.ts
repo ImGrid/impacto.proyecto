@@ -95,7 +95,7 @@ const ESTILOS = `
   .cab img { height: 46px; }
   .cab .meta { text-align: right; font-size: 9px; color: ${GRIS}; }
   .titulo { font-size: 20px; font-weight: 700; color: ${TEAL}; margin: 0 0 2px; }
-  .subt { font-size: 10px; color: ${GRIS}; margin: 0 0 16px; }
+  .subt { font-size: 10px; color: ${GRIS}; margin: 0 0 16px; page-break-after: avoid; }
   /* tarjetas KPI */
   .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; page-break-inside: avoid; }
   .kpi { flex: 1 1 0; min-width: 110px; border: 1px solid #e2e8e9;
@@ -404,7 +404,9 @@ export function construirPdfSucursal(opts: {
       )
     : '';
 
-  const real = `<div class="seccion"><h2>Actividad real <small>(lo que recolectó en el período)</small></h2>${kpis}${porMaterial}${entregas}</div>`;
+  // Encabezado + KPIs en `.seccion` (no se parten); tablas fuera para que fluyan
+  // entre páginas (evita el hueco en blanco cuando hay muchas entregas).
+  const real = `<div class="seccion"><h2>Actividad real <small>(lo que recolectó en el período)</small></h2>${kpis}</div>${porMaterial}${entregas}`;
 
   return documento(
     cabeceraHtml(`Sucursal · ${perfil.nombre}`, opts.periodo) + datos + real,
@@ -539,7 +541,9 @@ export function construirPdfRecolectora(opts: {
       )
     : '';
 
-  const real = `<div class="seccion"><h2>Actividad real <small>(lo que recolectó en el período)</small></h2>${kpis}${porMaterial}${txs}</div>`;
+  // Encabezado + KPIs en `.seccion` (no se parten); tablas fuera para que fluyan
+  // entre páginas (evita el hueco en blanco cuando hay muchas transacciones).
+  const real = `<div class="seccion"><h2>Actividad real <small>(lo que recolectó en el período)</small></h2>${kpis}</div>${porMaterial}${txs}`;
 
   return documento(
     cabeceraHtml(`Ficha de recolectora · ${perfil.nombre}`, opts.periodo) +
@@ -684,7 +688,11 @@ export function construirPdfGenerador(opts: {
       )
     : '';
 
-  const real = `<div class="seccion"><h2>Actividad real <small>(lo que aportaron sus sucursales en el período)</small></h2>${kpis}${porSucursal}${porMaterial}${entregas}</div>`;
+  // El encabezado + KPIs van en un `.seccion` (page-break-inside: avoid) para
+  // no partirse; las tablas quedan FUERA para poder fluir y paginar por filas
+  // (si todo va dentro del `.seccion`, un bloque más alto que la página se
+  // empuja entero a la hoja siguiente y deja la primera en blanco).
+  const real = `<div class="seccion"><h2>Actividad real <small>(lo que aportaron sus sucursales en el período)</small></h2>${kpis}</div>${porSucursal}${porMaterial}${entregas}`;
 
   return documento(
     cabeceraHtml(`Generador · ${perfil.nombre}`, opts.periodo) + datos + real,
