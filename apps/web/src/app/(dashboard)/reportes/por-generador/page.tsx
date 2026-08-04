@@ -2,14 +2,6 @@
 
 import { useState } from "react";
 import { Recycle, Wallet, Leaf, Building2, Store } from "lucide-react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useReporte } from "@/hooks/use-reportes";
 import type { ReportePorGenerador } from "@/types/reportes";
 import { type MultiOption } from "@/components/shared/multi-select";
@@ -20,12 +12,47 @@ import {
   type Periodo,
 } from "../_components/reporte-periodo-filtro";
 import { ReporteResumen } from "../_components/reporte-resumen";
-import { fmt } from "../_components/format";
+import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
+import { NOTA_PCT } from "../_components/notas";
 import { ReporteFiltroExtra } from "../_components/reporte-filtro-extra";
 import { RankingChart } from "../../estadisticas/_components/ranking-chart";
 import { GeneradorDetalleDialog } from "./_components/generador-detalle-dialog";
 
 type Filtros = Periodo & { generador_id?: number[] };
+type Fila = ReportePorGenerador["items"][number];
+
+/**
+ * Columnas de la tabla. Función porque la primera celda lleva el callback del
+ * drill-through (abrir la ficha del generador con sus sucursales).
+ */
+const columnas = (abrir: (id: number) => void): ReporteColumna<Fila>[] => [
+  {
+    key: "generador",
+    header: "Generador",
+    format: "text",
+    render: (g) => (
+      <button
+        type="button"
+        onClick={() => abrir(g.generador_id)}
+        className="text-primary text-left font-medium hover:underline"
+      >
+        {g.generador}
+      </button>
+    ),
+  },
+  {
+    key: "tipo_generador",
+    header: "Tipo",
+    format: "text",
+    render: (g) => g.tipo_generador ?? "—",
+  },
+  { key: "sucursales", header: "Sucursales", format: "int", align: "right" },
+  { key: "transacciones", header: "Entregas", format: "int", align: "right" },
+  { key: "kg", header: "Recolectado", format: "kg", align: "right" },
+  { key: "porcentaje", header: "Participación por generador", format: "pct", align: "right" },
+  { key: "co2_kg", header: "CO₂ evitado", format: "co2", align: "right" },
+  { key: "bs", header: "Generado", format: "bs", align: "right" },
+];
 
 export default function PorGeneradorPage() {
   const [filtros, setFiltros] = useState<Filtros>({});
@@ -94,53 +121,26 @@ export default function PorGeneradorPage() {
         />
       )}
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Generador</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead className="text-right">Sucursales</TableHead>
-              <TableHead className="text-right">Entregas</TableHead>
-              <TableHead className="text-right">Recolectado</TableHead>
-              <TableHead className="text-right">CO₂ evitado</TableHead>
-              <TableHead className="text-right">Generado</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={7}
-                  className="text-muted-foreground py-10 text-center text-sm"
-                >
-                  No hay generadores con actividad en el período.
-                </TableCell>
-              </TableRow>
-            ) : (
-              items.map((g) => (
-                <TableRow key={g.generador_id}>
-                  <TableCell>
-                    <button
-                      type="button"
-                      onClick={() => abrir(g.generador_id)}
-                      className="text-primary text-left font-medium hover:underline"
-                    >
-                      {g.generador}
-                    </button>
-                  </TableCell>
-                  <TableCell>{g.tipo_generador ?? "—"}</TableCell>
-                  <TableCell className="text-right tabular-nums">{g.sucursales}</TableCell>
-                  <TableCell className="text-right tabular-nums">{g.transacciones}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(g.kg, "kg")}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(g.co2_kg, "co2")}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(g.bs, "bs")}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <ReporteTabla
+        columns={columnas(abrir)}
+        rows={items}
+        emptyLabel="No hay generadores con actividad en el período."
+        total={
+          data
+            ? {
+                // Aquí `transacciones` SÍ suma: ninguna entrega mezcla material
+                // de dos generadores distintos (verificado en producción).
+                sucursales: data.total.sucursales,
+                transacciones: data.total.transacciones,
+                kg: data.total.kg,
+                ...(data.total.kg > 0 ? { porcentaje: 100 } : {}),
+                co2_kg: data.total.co2_kg,
+                bs: data.total.bs,
+              }
+            : undefined
+        }
+        nota={NOTA_PCT}
+      />
 
       <GeneradorDetalleDialog
         id={detalleId}

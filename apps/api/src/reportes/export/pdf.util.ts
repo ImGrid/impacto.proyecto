@@ -113,6 +113,7 @@ const ESTILOS = `
   tbody tr:nth-child(even) { background: ${ZEBRA}; }
   tr.total td { font-weight: 700; border-top: 2px solid ${TEAL}; background: #fff; }
   .vacio { color: ${GRIS}; text-align: center; padding: 28px 0; }
+  .nota { color: ${GRIS}; font-size: 8.5px; margin: 6px 0 0; page-break-inside: avoid; }
   /* ficha de recolectora */
   .seccion { page-break-inside: avoid; margin-bottom: 14px; }
   .seccion h2 { font-size: 12px; color: ${TEAL}; border-bottom: 1px solid #e2e8e9;
@@ -257,12 +258,15 @@ export function construirPdfReporte(opts: {
   grafico?: string;
   /** Texto del período si no es un rango de fechas (p. ej. "Todo el histórico"). */
   periodoLabel?: string;
+  /** Nota al pie de la tabla (p. ej. sobre qué se calculan los porcentajes). */
+  nota?: string;
 }): string {
   return documento(
     cabeceraHtml(opts.titulo, opts.periodo, undefined, opts.periodoLabel) +
       kpisHtml(opts.kpis) +
       (opts.grafico ?? '') +
-      tablaHtml(opts.columnas, opts.filas, opts.total),
+      tablaHtml(opts.columnas, opts.filas, opts.total) +
+      (opts.nota ? `<p class="nota">${escapeHtml(opts.nota)}</p>` : ''),
   );
 }
 

@@ -14,6 +14,7 @@ import {
 import { ReporteResumen } from "../_components/reporte-resumen";
 import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
 import { ReporteFiltroExtra } from "../_components/reporte-filtro-extra";
+import { NOTA_PCT } from "../_components/notas";
 import { RankingChart } from "../../estadisticas/_components/ranking-chart";
 
 type Fila = ReportePorAsociacion["items"][number];
@@ -24,6 +25,7 @@ const columnas: ReporteColumna<Fila>[] = [
   { key: "recolectoras", header: "Recolectoras", format: "int", align: "right" },
   { key: "transacciones", header: "Entregas", format: "int", align: "right" },
   { key: "kg", header: "Recolectado", format: "kg", align: "right" },
+  { key: "porcentaje", header: "Participación por asociación", format: "pct", align: "right" },
   { key: "co2_kg", header: "CO₂ evitado", format: "co2", align: "right" },
   { key: "bs", header: "Generado", format: "bs", align: "right" },
 ];
@@ -92,11 +94,13 @@ export default function PorAsociacionPage() {
                 recolectoras: data.total.recolectoras,
                 transacciones: data.total.transacciones,
                 kg: data.total.kg,
+                ...(data.total.kg > 0 ? { porcentaje: 100 } : {}),
                 co2_kg: data.total.co2_kg,
                 bs: data.total.bs,
               }
             : undefined
         }
+        nota={NOTA_PCT}
       />
     </ReporteShell>
   );

@@ -38,6 +38,8 @@ export async function construirExcelReporte(opts: {
   nombreHoja?: string;
   /** Texto del período si no es un rango de fechas (p. ej. "Todo el histórico"). */
   periodoLabel?: string;
+  /** Nota al pie de la tabla (p. ej. sobre qué se calculan los porcentajes). */
+  nota?: string;
 }): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Triple Impacto';
@@ -113,6 +115,17 @@ export async function construirExcelReporte(opts: {
       cell.border = { top: { style: 'thin', color: { argb: TEAL } } };
       cell.alignment = { horizontal: c.align === 'right' ? 'right' : 'left' };
     });
+  }
+
+  // Nota al pie, una fila por debajo del TOTAL (fuera del autoFilter, que solo
+  // abarca la cabecera, para que no se cuele como si fuera un dato).
+  if (opts.nota) {
+    const rNota = 4 + opts.filas.length + (opts.total ? 1 : 0) + 1;
+    ws.mergeCells(rNota, 1, rNota, ncols);
+    const cell = ws.getCell(rNota, 1);
+    cell.value = opts.nota;
+    cell.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF666666' } };
+    cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
   }
 
   // Filtro automático sobre la cabecera.

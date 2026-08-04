@@ -2,14 +2,6 @@
 
 import { useState } from "react";
 import { Store, Recycle, Wallet, Leaf, Tags } from "lucide-react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useReporte } from "@/hooks/use-reportes";
 import type {
   ReporteSucursalesLista,
@@ -17,10 +9,42 @@ import type {
 } from "@/types/reportes";
 import { ReporteShell } from "../_components/reporte-shell";
 import { ReporteResumen } from "../_components/reporte-resumen";
-import { fmt } from "../_components/format";
+import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
+import { NOTA_PCT, notaEntregas } from "../_components/notas";
 import { RankingChart } from "../../estadisticas/_components/ranking-chart";
 import { SucursalesFiltros } from "./_components/sucursales-filtros";
 import { SucursalDetalleDialog } from "./_components/sucursal-detalle-dialog";
+
+type Fila = ReporteSucursalesLista["items"][number];
+
+/**
+ * Columnas de la tabla. Es una función porque la primera celda necesita el
+ * callback del drill-through (abrir la ficha de la sucursal).
+ */
+const columnas = (abrir: (id: number) => void): ReporteColumna<Fila>[] => [
+  {
+    key: "sucursal",
+    header: "Sucursal",
+    format: "text",
+    render: (s) => (
+      <button
+        type="button"
+        onClick={() => abrir(s.sucursal_id)}
+        className="text-primary text-left font-medium hover:underline"
+      >
+        {s.sucursal}
+      </button>
+    ),
+  },
+  { key: "generador", header: "Generador", format: "text" },
+  { key: "tipo_generador", header: "Tipo", format: "text" },
+  { key: "ciudad", header: "Ciudad", format: "text" },
+  { key: "entregas", header: "Entregas", format: "int", align: "right" },
+  { key: "kg", header: "Recolectado", format: "kg", align: "right" },
+  { key: "porcentaje", header: "Participación por sucursal", format: "pct", align: "right" },
+  { key: "co2_kg", header: "CO₂ evitado", format: "co2", align: "right" },
+  { key: "bs", header: "Generado", format: "bs", align: "right" },
+];
 
 export default function SucursalesPage() {
   const [filtros, setFiltros] = useState<ReporteSucursalesFiltros>({});
@@ -72,55 +96,25 @@ export default function SucursalesPage() {
         />
       )}
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Sucursal</TableHead>
-              <TableHead>Generador</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Ciudad</TableHead>
-              <TableHead className="text-right">Entregas</TableHead>
-              <TableHead className="text-right">Recolectado</TableHead>
-              <TableHead className="text-right">CO₂ evitado</TableHead>
-              <TableHead className="text-right">Generado</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={8}
-                  className="text-muted-foreground py-10 text-center text-sm"
-                >
-                  No hay sucursales que cumplan los filtros.
-                </TableCell>
-              </TableRow>
-            ) : (
-              items.map((s) => (
-                <TableRow key={s.sucursal_id}>
-                  <TableCell>
-                    <button
-                      type="button"
-                      onClick={() => abrir(s.sucursal_id)}
-                      className="text-primary text-left font-medium hover:underline"
-                    >
-                      {s.sucursal}
-                    </button>
-                  </TableCell>
-                  <TableCell>{s.generador}</TableCell>
-                  <TableCell>{s.tipo_generador}</TableCell>
-                  <TableCell>{s.ciudad}</TableCell>
-                  <TableCell className="text-right tabular-nums">{s.entregas}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(s.kg, "kg")}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(s.co2_kg, "co2")}</TableCell>
-                  <TableCell className="text-right tabular-nums">{fmt(s.bs, "bs")}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <ReporteTabla
+        columns={columnas(abrir)}
+        rows={items}
+        emptyLabel="No hay sucursales que cumplan los filtros."
+        total={
+          data
+            ? {
+                // `entregas` fuera del TOTAL: una entrega puede traer material
+                // de varias sucursales, así que la columna suma más que las
+                // entregas reales (el número correcto está en el KPI de arriba).
+                kg: data.total.kg,
+                ...(data.total.kg > 0 ? { porcentaje: 100 } : {}),
+                co2_kg: data.total.co2_kg,
+                bs: data.total.bs,
+              }
+            : undefined
+        }
+        nota={`${NOTA_PCT} ${notaEntregas("material de varias sucursales")}`}
+      />
 
       <SucursalDetalleDialog
         id={detalleId}

@@ -13,6 +13,7 @@ import {
 } from "../_components/reporte-periodo-filtro";
 import { ReporteResumen } from "../_components/reporte-resumen";
 import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
+import { NOTA_PCT, notaEntregas } from "../_components/notas";
 import { RankingChart } from "../../estadisticas/_components/ranking-chart";
 
 type Fila = ReportePorMaterial["items"][number];
@@ -22,7 +23,7 @@ const columnas: ReporteColumna<Fila>[] = [
   { key: "material", header: "Material", format: "text" },
   { key: "transacciones", header: "Entregas", format: "int", align: "right" },
   { key: "kg", header: "Recolectado", format: "kg", align: "right" },
-  { key: "porcentaje", header: "% del total", format: "pct", align: "right" },
+  { key: "porcentaje", header: "Participación por material", format: "pct", align: "right" },
   { key: "co2_kg", header: "CO₂ evitado", format: "co2", align: "right" },
   { key: "bs", header: "Generado", format: "bs", align: "right" },
 ];
@@ -97,13 +98,17 @@ export default function PorMaterialPage() {
         total={
           data
             ? {
-                transacciones: data.total.transacciones,
+                // `transacciones` fuera: la columna cuenta cada entrega una vez
+                // por material, así que su suma contradiría el total real (que
+                // está en el KPI "Recolectoras"/"Entregas" de arriba).
                 kg: data.total.kg,
+                ...(data.total.kg > 0 ? { porcentaje: 100 } : {}),
                 co2_kg: data.total.co2_kg,
                 bs: data.total.bs,
               }
             : undefined
         }
+        nota={`${NOTA_PCT} ${notaEntregas("varios materiales")}`}
       />
     </ReporteShell>
   );

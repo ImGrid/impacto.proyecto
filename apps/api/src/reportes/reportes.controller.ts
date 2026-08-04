@@ -64,6 +64,48 @@ const NUMFMT: Record<PdfTipoCol, string | undefined> = {
  * (numFmt + align) y a columnas de PDF (tipo). Evita mantener dos listas.
  */
 type Col = { header: string; key: string; width?: number; tipo: PdfTipoCol };
+
+/**
+ * Nota al pie de los reportes que llevan columna de participación. Responde por
+ * escrito la pregunta "¿porcentaje sobre qué?": el denominador es el TOTAL que
+ * se ve al pie, que ya lleva dentro el período, los filtros de entidad y el
+ * departamento del admin. Por eso una misma sucursal participa distinto según
+ * el recorte. Cubre además el redondeo (la columna puede sumar 99,9% o 100,1%).
+ */
+const NOTA_PCT =
+  'La participación se calcula sobre el TOTAL mostrado, que ya refleja el período, ' +
+  'los filtros aplicados y el departamento del administrador. Por redondeo, la suma ' +
+  'de la columna puede no dar exactamente 100,0%.';
+
+/**
+ * Columna de participación (%). El encabezado nombra la dimensión —
+ * "Participación por sucursal" — en vez del ambiguo "% del total": así el
+ * propio título dice sobre qué se reparte.
+ */
+const colPct = (dimension: string): Col => ({
+  header: `Participación por ${dimension}`,
+  key: 'porcentaje',
+  width: 22,
+  tipo: 'pct',
+});
+
+/**
+ * Celda de % de la fila TOTAL. 100,0% cuando hay algo que repartir; si no hay
+ * kg, se deja vacía en vez de afirmar un 100% de nada.
+ */
+const totalPct = (kg: number): { porcentaje?: number } =>
+  kg > 0 ? { porcentaje: 100 } : {};
+
+/**
+ * Aviso para los dos reportes cuya columna "Entregas" NO es sumable, porque una
+ * misma entrega se cuenta en varias filas: por-material (una entrega trae varios
+ * materiales) y sucursales (una entrega trae material de varias sucursales —
+ * verificado: 12 en producción). En esos dos la celda de TOTAL de esa columna se
+ * deja vacía a propósito; el número real de entregas está en los KPIs de arriba.
+ */
+const notaEntregas = (queSeRepite: string) =>
+  `Una misma entrega puede incluir ${queSeRepite}, por lo que se cuenta en varias filas: ` +
+  'la columna "Entregas" no suma el total del período (ese dato está en los indicadores de arriba).';
 const aExcel = (cols: Col[]): ExcelColumna[] =>
   cols.map((c) => ({
     header: c.header,
@@ -135,12 +177,14 @@ export class ReportesController {
       { header: 'Departamento', key: 'departamento', width: 22, tipo: 'text' },
       { header: 'Entregas', key: 'transacciones', width: 12, tipo: 'int' },
       { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      colPct('departamento'),
       { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
       { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
     ];
     const total = {
       transacciones: data.total.transacciones,
       kg: data.total.kg,
+      ...totalPct(data.total.kg),
       co2_kg: data.total.co2_kg,
       bs: data.total.bs,
     };
@@ -179,6 +223,7 @@ export class ReportesController {
         titulo: 'Comparación nacional',
         periodo: data.rango,
         periodoLabel,
+        nota: NOTA_PCT,
         kpis: [
           { label: 'Departamentos con datos', value: pdfNum.ent(conDatos) },
           { label: 'Recolectado', value: pdfNum.kg(data.total.kg) },
@@ -196,6 +241,7 @@ export class ReportesController {
       titulo: 'Comparación nacional',
       periodo: data.rango,
       periodoLabel,
+      nota: NOTA_PCT,
       columnas: aExcel(cols),
       filas: data.items,
       total,
@@ -219,6 +265,7 @@ export class ReportesController {
       { header: 'Recolectoras', key: 'recolectoras', width: 14, tipo: 'int' },
       { header: 'Entregas', key: 'transacciones', width: 12, tipo: 'int' },
       { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      colPct('asociación'),
       { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
       { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
     ];
@@ -226,6 +273,7 @@ export class ReportesController {
       recolectoras: data.total.recolectoras,
       transacciones: data.total.transacciones,
       kg: data.total.kg,
+      ...totalPct(data.total.kg),
       co2_kg: data.total.co2_kg,
       bs: data.total.bs,
     };
@@ -233,6 +281,7 @@ export class ReportesController {
       const html = construirPdfReporte({
         titulo: 'Recolección por asociación',
         periodo: data.rango,
+        nota: NOTA_PCT,
         kpis: [
           { label: 'Asociaciones', value: pdfNum.ent(data.items.length) },
           { label: 'Recolectoras', value: pdfNum.ent(data.total.recolectoras) },
@@ -260,6 +309,7 @@ export class ReportesController {
     const buffer = await construirExcelReporte({
       titulo: 'Recolección por asociación',
       periodo: data.rango,
+      nota: NOTA_PCT,
       columnas: aExcel(cols),
       filas: data.items,
       total,
@@ -280,6 +330,7 @@ export class ReportesController {
       { header: 'Recolectoras', key: 'recolectoras', width: 14, tipo: 'int' },
       { header: 'Entregas', key: 'transacciones', width: 12, tipo: 'int' },
       { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      colPct('zona'),
       { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
       { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
     ];
@@ -287,6 +338,7 @@ export class ReportesController {
       recolectoras: data.total.recolectoras,
       transacciones: data.total.transacciones,
       kg: data.total.kg,
+      ...totalPct(data.total.kg),
       co2_kg: data.total.co2_kg,
       bs: data.total.bs,
     };
@@ -294,6 +346,7 @@ export class ReportesController {
       const html = construirPdfReporte({
         titulo: 'Recolección por zona',
         periodo: data.rango,
+        nota: NOTA_PCT,
         kpis: [
           { label: 'Zonas', value: pdfNum.ent(data.items.length) },
           { label: 'Recolectoras', value: pdfNum.ent(data.total.recolectoras) },
@@ -318,6 +371,7 @@ export class ReportesController {
     const buffer = await construirExcelReporte({
       titulo: 'Recolección por zona',
       periodo: data.rango,
+      nota: NOTA_PCT,
       columnas: aExcel(cols),
       filas: data.items,
       total,
@@ -345,12 +399,14 @@ export class ReportesController {
       { header: 'Tipo', key: 'tipo', width: 20, tipo: 'text' },
       { header: 'Entregas', key: 'transacciones', width: 12, tipo: 'int' },
       { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      colPct('destino'),
       { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
       { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
     ];
     const total = {
       transacciones: data.total.transacciones,
       kg: data.total.kg,
+      ...totalPct(data.total.kg),
       co2_kg: data.total.co2_kg,
       bs: data.total.bs,
     };
@@ -358,6 +414,7 @@ export class ReportesController {
       const html = construirPdfReporte({
         titulo: 'Recolección por destino',
         periodo: data.rango,
+        nota: NOTA_PCT,
         kpis: [
           { label: 'Destinos', value: pdfNum.ent(data.items.length) },
           { label: 'Entregas', value: pdfNum.ent(data.total.transacciones) },
@@ -374,6 +431,7 @@ export class ReportesController {
     const buffer = await construirExcelReporte({
       titulo: 'Recolección por destino',
       periodo: data.rango,
+      nota: NOTA_PCT,
       columnas: aExcel(cols),
       filas,
       total,
@@ -392,20 +450,24 @@ export class ReportesController {
       { header: 'Material', key: 'material', width: 28, tipo: 'text' },
       { header: 'Entregas', key: 'transacciones', width: 12, tipo: 'int' },
       { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
-      { header: '% del total', key: 'porcentaje', width: 12, tipo: 'pct' },
+      colPct('material'),
       { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
       { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
     ];
+    // `transacciones` NO va en el TOTAL: la columna cuenta cada entrega una vez
+    // por material, así que su suma (1.059) contradiría el total real (405).
     const total = {
-      transacciones: data.total.transacciones,
       kg: data.total.kg,
+      ...totalPct(data.total.kg),
       co2_kg: data.total.co2_kg,
       bs: data.total.bs,
     };
+    const nota = `${NOTA_PCT} ${notaEntregas('varios materiales')}`;
     if (query.formato === 'pdf') {
       const html = construirPdfReporte({
         titulo: 'Recolección por material',
         periodo: data.rango,
+        nota,
         kpis: [
           { label: 'Materiales', value: pdfNum.ent(data.items.length) },
           { label: 'Entregas', value: pdfNum.ent(data.total.transacciones) },
@@ -433,6 +495,7 @@ export class ReportesController {
     const buffer = await construirExcelReporte({
       titulo: 'Recolección por material',
       periodo: data.rango,
+      nota,
       columnas: aExcel(cols),
       filas: data.items,
       total,
@@ -457,6 +520,7 @@ export class ReportesController {
       { header: 'Sucursales', key: 'sucursales', width: 12, tipo: 'int' },
       { header: 'Entregas', key: 'transacciones', width: 12, tipo: 'int' },
       { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      colPct('generador'),
       { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
       { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
     ];
@@ -464,6 +528,7 @@ export class ReportesController {
       sucursales: data.total.sucursales,
       transacciones: data.total.transacciones,
       kg: data.total.kg,
+      ...totalPct(data.total.kg),
       co2_kg: data.total.co2_kg,
       bs: data.total.bs,
     };
@@ -471,6 +536,7 @@ export class ReportesController {
       const html = construirPdfReporte({
         titulo: 'Cantidad por generador',
         periodo: data.rango,
+        nota: NOTA_PCT,
         kpis: [
           { label: 'Generadores', value: pdfNum.ent(data.items.length) },
           { label: 'Sucursales', value: pdfNum.ent(data.total.sucursales) },
@@ -498,6 +564,7 @@ export class ReportesController {
     const buffer = await construirExcelReporte({
       titulo: 'Cantidad por generador',
       periodo: data.rango,
+      nota: NOTA_PCT,
       columnas: aExcel(cols),
       filas,
       total,
@@ -548,12 +615,14 @@ export class ReportesController {
       { header: 'Generadores', key: 'generadores', width: 13, tipo: 'int' },
       { header: 'Entregas', key: 'transacciones', width: 12, tipo: 'int' },
       { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      colPct('tipo'),
       { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
       { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
     ];
     const total = {
       transacciones: data.total.transacciones,
       kg: data.total.kg,
+      ...totalPct(data.total.kg),
       co2_kg: data.total.co2_kg,
       bs: data.total.bs,
     };
@@ -561,6 +630,7 @@ export class ReportesController {
       const html = construirPdfReporte({
         titulo: 'Recolección por tipo de generador',
         periodo: data.rango,
+        nota: NOTA_PCT,
         kpis: [
           { label: 'Tipos', value: pdfNum.ent(data.items.length) },
           { label: 'Entregas', value: pdfNum.ent(data.total.transacciones) },
@@ -588,6 +658,7 @@ export class ReportesController {
     const buffer = await construirExcelReporte({
       titulo: 'Recolección por tipo de generador',
       periodo: data.rango,
+      nota: NOTA_PCT,
       columnas: aExcel(cols),
       filas: data.items,
       total,
@@ -860,19 +931,25 @@ export class ReportesController {
       { header: 'Ciudad', key: 'ciudad', width: 16, tipo: 'text' },
       { header: 'Entregas', key: 'entregas', width: 12, tipo: 'int' },
       { header: 'Recolectado', key: 'kg', width: 16, tipo: 'kg' },
+      colPct('sucursal'),
       { header: 'CO₂ evitado', key: 'co2_kg', width: 16, tipo: 'co2' },
       { header: 'Generado', key: 'bs', width: 16, tipo: 'bs' },
     ];
+    // `entregas` NO va en el TOTAL: una entrega puede traer material de varias
+    // sucursales, así que la columna suma 420 mientras las entregas reales son
+    // 405. El número correcto está en el KPI "Entregas" de arriba.
     const total = {
-      entregas: data.total.transacciones,
       kg: data.total.kg,
+      ...totalPct(data.total.kg),
       co2_kg: data.total.co2_kg,
       bs: data.total.bs,
     };
+    const nota = `${NOTA_PCT} ${notaEntregas('material de varias sucursales')}`;
     if (query.formato === 'pdf') {
       const html = construirPdfReporte({
         titulo: 'Recolección por sucursal',
         periodo: data.rango,
+        nota,
         kpis: [
           { label: 'Sucursales', value: pdfNum.ent(data.total.sucursales) },
           { label: 'Entregas', value: pdfNum.ent(data.total.transacciones) },
@@ -905,6 +982,7 @@ export class ReportesController {
     const buffer = await construirExcelReporte({
       titulo: 'Recolección por sucursal',
       periodo: data.rango,
+      nota,
       columnas: aExcel(cols),
       filas: data.items,
       total,

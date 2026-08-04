@@ -12,6 +12,7 @@ import {
 } from "../_components/reporte-periodo-filtro";
 import { ReporteResumen } from "../_components/reporte-resumen";
 import { ReporteTabla, type ReporteColumna } from "../_components/reporte-tabla";
+import { NOTA_PCT } from "../_components/notas";
 import { NacionalBarras } from "./_components/nacional-barras";
 
 type Fila = ReporteNacional["items"][number];
@@ -29,6 +30,7 @@ const columnas: ReporteColumna<Fila>[] = [
   { key: "departamento", header: "Departamento", format: "text" },
   { key: "transacciones", header: "Entregas", format: "int", align: "right" },
   { key: "kg", header: "Recolectado", format: "kg", align: "right" },
+  { key: "porcentaje", header: "Participación por departamento", format: "pct", align: "right" },
   { key: "co2_kg", header: "CO₂ evitado", format: "co2", align: "right" },
   { key: "bs", header: "Generado", format: "bs", align: "right" },
 ];
@@ -109,11 +111,13 @@ export default function NacionalPage() {
             ? {
                 transacciones: data.total.transacciones,
                 kg: data.total.kg,
+                ...(data.total.kg > 0 ? { porcentaje: 100 } : {}),
                 co2_kg: data.total.co2_kg,
                 bs: data.total.bs,
               }
             : undefined
         }
+        nota={NOTA_PCT}
       />
     </ReporteShell>
   );

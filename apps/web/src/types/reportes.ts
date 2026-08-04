@@ -4,6 +4,10 @@
 
 export type ReporteRango = { desde: string; hasta: string };
 
+// Los `items` de los reportes agregados llevan `porcentaje`: la participación
+// de la fila sobre los kg del TOTAL mostrado. La calcula el backend
+// (`conParticipacion`) para que pantalla, Excel y PDF digan siempre lo mismo.
+
 export type TotalTx = {
   recolectoras: number;
   transacciones: number;
@@ -30,6 +34,7 @@ export type ReportePorAsociacion = {
     kg: number;
     co2_kg: number;
     bs: number;
+    porcentaje: number;
   }[];
 };
 
@@ -45,6 +50,7 @@ export type ReportePorZona = {
     kg: number;
     co2_kg: number;
     bs: number;
+    porcentaje: number;
   }[];
 };
 
@@ -58,6 +64,7 @@ export type ReportePorDestino = {
     kg: number;
     co2_kg: number;
     bs: number;
+    porcentaje: number;
   }[];
 };
 
@@ -94,6 +101,7 @@ export type ReportePorGenerador = {
     kg: number;
     co2_kg: number;
     bs: number;
+    porcentaje: number;
   }[];
 };
 
@@ -159,6 +167,7 @@ export type ReportePorTipoGenerador = {
     kg: number;
     bs: number;
     co2_kg: number;
+    porcentaje: number;
   }[];
 };
 
@@ -189,6 +198,7 @@ export type ReporteNacional = {
     kg: number;
     co2_kg: number;
     bs: number;
+    porcentaje: number;
   }[];
 };
 
@@ -224,6 +234,7 @@ export type ReporteSucursalesLista = {
     kg: number;
     co2_kg: number;
     bs: number;
+    porcentaje: number;
   }[];
 };
 

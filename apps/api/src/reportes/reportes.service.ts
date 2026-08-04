@@ -471,7 +471,7 @@ export class ReportesService {
     return {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
       total: this.redondearObj(total),
-      items: items.map((i) => this.redondearObj(i)),
+      items: this.conParticipacion(items, total.kg),
     };
   }
 
@@ -686,10 +686,7 @@ export class ReportesService {
     return {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
       total,
-      items: items.map((i) => ({
-        ...this.redondearObj(i),
-        porcentaje: total.kg > 0 ? this.round((i.kg / total.kg) * 100) : 0,
-      })),
+      items: this.conParticipacion(items, total.kg),
     };
   }
 
@@ -729,10 +726,11 @@ export class ReportesService {
       GROUP BY tg.id, tg.nombre
       ORDER BY kg DESC
     `);
+    const total = await this.totalLineaSucursal(desde, hasta, depto, filtroTotal);
     return {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
-      total: await this.totalLineaSucursal(desde, hasta, depto, filtroTotal),
-      items: items.map((i) => this.redondearObj(i)),
+      total,
+      items: this.conParticipacion(items, total.kg),
     };
   }
 
@@ -875,7 +873,7 @@ export class ReportesService {
     return {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
       total: { sucursales: items.length, ...totalLinea },
-      items: items.map((i) => this.redondearObj(i)),
+      items: this.conParticipacion(items, totalLinea.kg),
     };
   }
 
@@ -1303,7 +1301,31 @@ export class ReportesService {
     return this.redondearObj(total);
   }
 
-  private empaquetar<T extends Record<string, unknown>>(
+  /**
+   * Añade a cada fila su PARTICIPACIÓN (%) sobre los kg del total, y redondea.
+   * Es la columna que el cliente usa en sus informes ("participación por
+   * agencia/ciudad/tipo de material").
+   *
+   * El denominador es SIEMPRE el mismo `total` que se muestra al pie de la
+   * tabla, de modo que el período, los filtros de entidad y el scope por
+   * departamento ya vienen reflejados en él: los porcentajes suman 100% de lo
+   * mostrado. La nota al pie del reporte lo explica al lector, porque el mismo
+   * ítem participa distinto según el recorte (una sucursal puede ser el 12,7%
+   * del país y el 35,4% de su departamento).
+   *
+   * Sin nada que repartir → 0 (nunca se divide entre cero).
+   */
+  private conParticipacion<T extends Record<string, unknown> & { kg: number }>(
+    items: T[],
+    totalKg: number,
+  ) {
+    return items.map((i) => ({
+      ...this.redondearObj(i),
+      porcentaje: totalKg > 0 ? this.round((i.kg / totalKg) * 100) : 0,
+    }));
+  }
+
+  private empaquetar<T extends Record<string, unknown> & { kg: number }>(
     desde: Date,
     hasta: Date,
     total: TotalTx,
@@ -1312,7 +1334,7 @@ export class ReportesService {
     return {
       rango: { desde: desde.toISOString(), hasta: hasta.toISOString() },
       total,
-      items: items.map((i) => this.redondearObj(i)),
+      items: this.conParticipacion(items, total.kg),
     };
   }
 
