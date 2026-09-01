@@ -74,4 +74,20 @@ export class UpdatePerfilDto {
   @IsInt({ each: true })
   @Type(() => Number)
   materiales?: number[];
+
+  // Foto de perfil, en base64 (con o sin prefijo `data:`), enviada desde la
+  // app móvil. Solo aplica al RECOLECTOR: es el único actor con `foto_url`.
+  //
+  // Hasta ahora la foto solo la podía cargar el administrador desde la web.
+  // Se procesa igual que en el CRUD del admin (ImageStorageService: valida el
+  // formato real con libvips, redimensiona a 512 px, convierte a WebP y
+  // elimina los metadatos EXIF, que en una foto de celular incluyen la
+  // ubicación GPS de donde se tomó).
+  //
+  // El tope de longitud es un cortafuegos temprano; el límite real (8 MB del
+  // binario) lo valida ImageStorageService.
+  @IsOptional()
+  @IsString()
+  @MaxLength(12_000_000, { message: 'La imagen es demasiado grande' })
+  foto_base64?: string;
 }

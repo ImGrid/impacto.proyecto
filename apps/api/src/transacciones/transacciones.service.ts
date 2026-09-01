@@ -963,7 +963,25 @@ export class TransaccionesService {
 
   /**
    * Transacciones pendientes de verificación para un centro operacional.
-   * RECOLECTADO con destino = este centro.
+   *
+   * Incluye DOS casos, porque en la práctica el recolector casi nunca elige
+   * destino al registrar (son personas mayores; el formulario ofrece
+   * "decidir después" como opción por defecto):
+   *
+   *   1. RECOLECTADO con destino = este centro (el recolector sí lo eligió).
+   *   2. RECOLECTADO SIN destino todavía, de un recolector del mismo
+   *      departamento que este centro. Es el flujo real: el recolector
+   *      registra lo que juntó y días después aparece por el centro con el
+   *      material. Sin este caso la lista salía siempre vacía y el centro no
+   *      tenía forma de encontrar la entrega para verificarla.
+   *
+   * Se excluyen a propósito las que ya tienen destino externo o desconocido:
+   * `update()` las rechaza, así que mostrarlas solo produciría un error al
+   * intentar verificarlas.
+   *
+   * El filtro por departamento es el mismo que exige `ensureMismoDepartamento`
+   * al momento de verificar, así que todo lo que aparece en esta lista se
+   * puede verificar de verdad.
    */
   async findPendientes(userId: number, recolectorId?: number) {
     const centro = await this.prisma.centro_operacional.findFirst({
@@ -975,8 +993,16 @@ export class TransaccionesService {
 
     return this.prisma.transaccion.findMany({
       where: {
-        centro_operacional_id: centro.id,
         estado: 'RECOLECTADO',
+        OR: [
+          { centro_operacional_id: centro.id },
+          {
+            centro_operacional_id: null,
+            acopiador_externo_id: null,
+            destino_desconocido: false,
+            recolector: { departamento_id: centro.departamento_id },
+          },
+        ],
         ...(recolectorId ? { recolector_id: recolectorId } : {}),
       },
       orderBy: { fecha_creacion: 'desc' },

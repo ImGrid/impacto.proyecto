@@ -5,11 +5,15 @@ import {
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
 import { PrismaService } from '../prisma';
+import { ImageStorageService } from '../common/services/image-storage.service';
 import { UpdatePerfilDto } from './dto';
 
 @Injectable()
 export class PerfilService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly imageStorage: ImageStorageService,
+  ) {}
 
   /**
    * Obtener el perfil del usuario logueado según su rol.
@@ -99,66 +103,92 @@ export class PerfilService {
       }
     }
 
-    // Todo en una transacción: campos simples + N:N (días y materiales).
-    // Si cualquier parte falla, se revierte todo.
-    await this.prisma.$transaction(async (tx) => {
-      // 1) Campos simples del recolector
-      const data: Record<string, unknown> = {};
-      if (dto.celular !== undefined) data.celular = dto.celular;
-      if (dto.direccion_domicilio !== undefined) {
-        data.direccion_domicilio = dto.direccion_domicilio;
-      }
-      if (dto.latitud !== undefined) data.latitud = dto.latitud;
-      if (dto.longitud !== undefined) data.longitud = dto.longitud;
+    // La foto se procesa y escribe a disco ANTES de abrir la transacción:
+    // valida el formato y falla temprano sin dejar la BD a medias. Se guarda
+    // la ruta anterior para borrar el archivo viejo recién cuando la
+    // transacción haya confirmado (mismo patrón que el CRUD del admin).
+    const fotoUrlAnterior = recolector.foto_url;
+    const fotoUrlNueva = dto.foto_base64
+      ? await this.imageStorage.saveFromBase64(dto.foto_base64, 'recolectores')
+      : undefined;
 
-      if (Object.keys(data).length > 0) {
-        await tx.recolector.update({
-          where: { id: recolector.id },
-          data,
-        });
-      }
+    try {
+      // Todo en una transacción: campos simples + N:N (días y materiales).
+      // Si cualquier parte falla, se revierte todo.
+      await this.prisma.$transaction(async (tx) => {
+        // 1) Campos simples del recolector
+        const data: Record<string, unknown> = {};
+        if (dto.celular !== undefined) data.celular = dto.celular;
+        if (dto.direccion_domicilio !== undefined) {
+          data.direccion_domicilio = dto.direccion_domicilio;
+        }
+        if (dto.latitud !== undefined) data.latitud = dto.latitud;
+        if (dto.longitud !== undefined) data.longitud = dto.longitud;
+        if (fotoUrlNueva !== undefined) data.foto_url = fotoUrlNueva;
 
-      // 2) Días de trabajo: mismo patrón que el CRUD admin
-      // (delete-all + create-many). Permite enviar [] para vaciar.
-      if (dto.dias_trabajo !== undefined) {
-        await tx.recolector_dia_trabajo.deleteMany({
-          where: { recolector_id: recolector.id },
-        });
-        if (dto.dias_trabajo.length > 0) {
-          // Deduplicar por si el cliente envía duplicados; la BD tiene
-          // UNIQUE(recolector_id, dia_semana).
-          const diasUnicos = Array.from(new Set(dto.dias_trabajo));
-          await tx.recolector_dia_trabajo.createMany({
-            data: diasUnicos.map((dia) => ({
-              recolector_id: recolector.id,
-              dia_semana: dia,
-            })),
+        if (Object.keys(data).length > 0) {
+          await tx.recolector.update({
+            where: { id: recolector.id },
+            data,
           });
         }
-      }
 
-      // 3) Materiales: el recolector envía solo IDs. Mantenemos
-      // cantidad_mensual, precio_venta y es_principal bajo control del admin.
-      // Para las filas nuevas: cantidad y precio como null, es_principal=false
-      // (default de la tabla).
-      if (dto.materiales !== undefined) {
-        await tx.recolector_material.deleteMany({
-          where: { recolector_id: recolector.id },
-        });
-        if (dto.materiales.length > 0) {
-          const idsUnicos = Array.from(new Set(dto.materiales));
-          await tx.recolector_material.createMany({
-            data: idsUnicos.map((materialId) => ({
-              recolector_id: recolector.id,
-              material_id: materialId,
-              cantidad_mensual: null,
-              precio_venta: null,
-              es_principal: false,
-            })),
+        // 2) Días de trabajo: mismo patrón que el CRUD admin
+        // (delete-all + create-many). Permite enviar [] para vaciar.
+        if (dto.dias_trabajo !== undefined) {
+          await tx.recolector_dia_trabajo.deleteMany({
+            where: { recolector_id: recolector.id },
           });
+          if (dto.dias_trabajo.length > 0) {
+            // Deduplicar por si el cliente envía duplicados; la BD tiene
+            // UNIQUE(recolector_id, dia_semana).
+            const diasUnicos = Array.from(new Set(dto.dias_trabajo));
+            await tx.recolector_dia_trabajo.createMany({
+              data: diasUnicos.map((dia) => ({
+                recolector_id: recolector.id,
+                dia_semana: dia,
+              })),
+            });
+          }
         }
+
+        // 3) Materiales: el recolector envía solo IDs. Mantenemos
+        // cantidad_mensual, precio_venta y es_principal bajo control del admin.
+        // Para las filas nuevas: cantidad y precio como null, es_principal=false
+        // (default de la tabla).
+        if (dto.materiales !== undefined) {
+          await tx.recolector_material.deleteMany({
+            where: { recolector_id: recolector.id },
+          });
+          if (dto.materiales.length > 0) {
+            const idsUnicos = Array.from(new Set(dto.materiales));
+            await tx.recolector_material.createMany({
+              data: idsUnicos.map((materialId) => ({
+                recolector_id: recolector.id,
+                material_id: materialId,
+                cantidad_mensual: null,
+                precio_venta: null,
+                es_principal: false,
+              })),
+            });
+          }
+        }
+      });
+    } catch (e) {
+      // La transacción falló: el archivo nuevo quedaría huérfano en disco.
+      if (fotoUrlNueva) {
+        await this.imageStorage.deleteByPublicPath(fotoUrlNueva);
       }
-    });
+      throw e;
+    }
+
+    // Confirmado. Recién ahora se borra la foto anterior, y solo si de verdad
+    // se reemplazó por otra. Si el borrado falla no se rompe la petición: el
+    // perfil ya quedó bien guardado y lo único que queda es un archivo
+    // suelto en disco.
+    if (fotoUrlNueva && fotoUrlAnterior && fotoUrlAnterior !== fotoUrlNueva) {
+      await this.imageStorage.deleteByPublicPath(fotoUrlAnterior);
+    }
 
     return this.getRecolectorProfile(userId);
   }

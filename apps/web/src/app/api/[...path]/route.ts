@@ -39,6 +39,25 @@ async function proxyRequest(req: NextRequest) {
   let accessToken = cookieStore.get("access_token")?.value;
   const refreshToken = cookieStore.get("refresh_token")?.value;
 
+  // La APP MÓVIL entra por este mismo dominio (nginx manda todo /api/* aquí,
+  // no al backend), pero no usa cookies: guarda el JWT en el almacenamiento
+  // seguro del teléfono y lo manda en la cabecera `Authorization`.
+  //
+  // Sin este respaldo el proxy descartaba esa cabecera y no enviaba ninguna
+  // credencial al backend, así que la app conseguía iniciar sesión (esa ruta
+  // es pública) y despues recibía 401 en absolutamente todo lo demás.
+  //
+  // La cookie tiene prioridad a propósito: en el navegador el token vive en
+  // una cookie httpOnly justamente para que el JavaScript de la página no
+  // pueda leerlo, y esa protección no debe poder saltarse mandando una
+  // cabecera. Este respaldo solo actúa cuando NO hay sesión de navegador.
+  if (!accessToken) {
+    const cabecera = req.headers.get("authorization");
+    if (cabecera?.startsWith("Bearer ")) {
+      accessToken = cabecera.slice("Bearer ".length).trim() || undefined;
+    }
+  }
+
   // Construir la URL destino: /api/zonas?page=1 → API_URL/zonas?page=1
   const { pathname, search } = req.nextUrl;
   const backendPath = pathname.replace(/^\/api/, "");
