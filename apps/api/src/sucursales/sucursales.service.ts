@@ -127,17 +127,47 @@ export class SucursalesService {
     let departamentoIdFiltro: number | undefined;
 
     if (userRol === 'RECOLECTOR' && userId != null) {
+      // El recolector ve las sucursales de SU DEPARTAMENTO, igual que el
+      // centro operacional (rama de abajo).
+      //
+      // Antes se limitaba a su ZONA, y esa restricción no venía de ninguna
+      // regla de negocio: al registrar una entrega, `validarSucursalesDeDetalles`
+      // acepta cualquier sucursal del mismo departamento. La consulta era más
+      // estricta que el guardado, con dos consecuencias medidas en producción:
+      //
+      //   - 49 de 108 recolectoras activas trabajan en zonas sin ninguna
+      //     sucursal, así que la pregunta "¿de dónde recogiste?" ni siquiera
+      //     les aparecía en la aplicación y no podían declarar el origen.
+      //   - Las demás veían entre 1 y 10 sucursales cuando su departamento
+      //     tiene entre 26 y 45. Si recogían de una sucursal de la zona de al
+      //     lado, no había forma de anotarlo.
+      //
+      // Los datos permiten el cambio con seguridad: en producción no hay
+      // ninguna sucursal ni recolector con `departamento_id` nulo, y ninguno
+      // discrepa de su cadena zona -> ciudad -> departamento.
       const recolector = await this.prisma.recolector.findFirst({
         where: { usuario_id: userId },
-        select: { zona_id: true },
+        select: { departamento_id: true },
       });
       if (!recolector) throw new ForbiddenException('Recolector no encontrado');
-      // Si manda zona_id distinta a la suya, se rechaza. Si no manda, se
-      // deriva automáticamente.
-      if (query.zona_id != null && query.zona_id !== recolector.zona_id) {
-        throw new ForbiddenException('No puede consultar sucursales de otras zonas');
+
+      // Puede acotar por zona si quiere, mientras sea una zona de su propio
+      // departamento.
+      if (query.zona_id != null) {
+        const zona = await this.prisma.zona.findUnique({
+          where: { id: query.zona_id },
+          select: { ciudad: { select: { departamento_id: true } } },
+        });
+        if (
+          !zona ||
+          zona.ciudad.departamento_id !== recolector.departamento_id
+        ) {
+          throw new ForbiddenException(
+            'No puede consultar sucursales de departamentos distintos al suyo',
+          );
+        }
       }
-      zonaIdFiltro = recolector.zona_id;
+      departamentoIdFiltro = recolector.departamento_id;
     } else if (userRol === 'ACOPIADOR' && userId != null) {
       // El centro operacional ve sucursales de SU DEPARTAMENTO (sin importar
       // la zona). Si manda zona_id, se valida que esa zona pertenezca al
