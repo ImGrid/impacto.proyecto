@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { MoreHorizontal, Pencil, Power, Trash2 } from "lucide-react";
+import { KeyRound, MoreHorizontal, Pencil, Power, Trash2 } from "lucide-react";
 import {
   useUpdateRecolector,
   useDeleteRecolector,
+  useResetPasswordRecolector,
 } from "@/hooks/use-recolectores";
 import type { Recolector } from "@/types/api";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { ResetPasswordDialog } from "@/components/shared/reset-password-dialog";
 import { RecolectorFormDialog } from "./recolector-form-dialog";
 
 interface RecolectoresTableActionsProps {
@@ -27,9 +29,11 @@ export function RecolectoresTableActions({
 }: RecolectoresTableActionsProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   const updateMutation = useUpdateRecolector();
   const deleteMutation = useDeleteRecolector();
+  const resetPasswordMutation = useResetPasswordRecolector();
 
   function handleToggleActivo() {
     updateMutation.mutate({
@@ -58,6 +62,10 @@ export function RecolectoresTableActions({
             <Pencil />
             Editar
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setPasswordOpen(true)}>
+            <KeyRound />
+            Restablecer contraseña
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={handleToggleActivo}>
             <Power />
             {recolector.usuario.activo ? "Desactivar" : "Activar"}
@@ -77,6 +85,21 @@ export function RecolectoresTableActions({
         open={editOpen}
         onOpenChange={setEditOpen}
         recolector={recolector}
+      />
+
+      <ResetPasswordDialog
+        open={passwordOpen}
+        onOpenChange={setPasswordOpen}
+        nombre={recolector.nombre_completo}
+        identificador={recolector.cedula_identidad}
+        tipoIdentificador="cédula"
+        isPending={resetPasswordMutation.isPending}
+        onConfirm={(password) =>
+          resetPasswordMutation.mutate(
+            { id: recolector.id, password },
+            { onSuccess: () => setPasswordOpen(false) },
+          )
+        }
       />
 
       <ConfirmDialog

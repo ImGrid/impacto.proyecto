@@ -217,3 +217,25 @@ export function useDeleteRecolector() {
     },
   });
 }
+
+/**
+ * El administrador le asigna una contraseña nueva al usuario.
+ *
+ * Es el único camino de recuperación del sistema: no existe "olvidé mi
+ * contraseña" por correo. El backend cierra además todas las sesiones
+ * abiertas de esa persona.
+ */
+export function useResetPasswordRecolector() {
+  return useMutation({
+    mutationFn: ({ id, password }: { id: number; password: string }) =>
+      clientPatch(`/recolectores/${id}/password`, { password }),
+    onSuccess: () => {
+      // No se invalida ninguna consulta: la contraseña no se muestra en
+      // ninguna tabla, así que no hay nada en pantalla que refrescar.
+      toast.success("Contraseña actualizada");
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+}

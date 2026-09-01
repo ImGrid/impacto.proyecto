@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma';
@@ -101,6 +105,42 @@ export class GeneradoresService {
     const { activo, ...generadorData } = dto;
 
     return this.prisma.$transaction(async (tx) => {
+      // El generador INICIA SESIÓN con su teléfono de contacto:
+      // `usuario.identificador` es una copia de `generador.contacto_telefono`
+      // hecha al crearlo. Si el administrador corrige el teléfono hay que
+      // mover los dos, o el generador sigue entrando con el número viejo
+      // mientras la web muestra el nuevo, sin que nadie se entere.
+      const telefonoNuevo = generadorData.contacto_telefono;
+      const cambiaTelefono =
+        telefonoNuevo !== undefined &&
+        telefonoNuevo !== generador.contacto_telefono;
+
+      if (cambiaTelefono) {
+        // Cuidado con esta asimetría: `generador.contacto_telefono` NO es
+        // único (dos generadores pueden compartir teléfono), pero
+        // `usuario.identificador` SÍ lo es. En los datos reales hay teléfonos
+        // de relleno repetibles como "0" o "00", así que este choque va a
+        // ocurrir. Se comprueba antes para explicarlo en castellano en vez de
+        // devolver el error crudo de la base de datos.
+        const ocupado = await tx.usuario.findFirst({
+          where: {
+            identificador: telefonoNuevo,
+            id: { not: generador.usuario_id },
+          },
+          select: { id: true },
+        });
+        if (ocupado) {
+          throw new BadRequestException(
+            `Ya existe otro usuario que inicia sesión con "${telefonoNuevo}". Use otro teléfono de contacto.`,
+          );
+        }
+
+        await tx.usuario.update({
+          where: { id: generador.usuario_id },
+          data: { identificador: telefonoNuevo },
+        });
+      }
+
       if (Object.keys(generadorData).length > 0) {
         await tx.generador.update({
           where: { id },
@@ -134,5 +174,34 @@ export class GeneradoresService {
     await this.prisma.usuario.delete({
       where: { id: generador.usuario_id },
     });
+  }
+
+  /**
+   * El administrador le asigna una contraseña nueva al generador.
+   *
+   * Se cierran todas sus sesiones abiertas: si el cambio se hace porque
+   * alguien más tuvo acceso a la cuenta, dejar viva la sesión anterior lo
+   * haría inútil (el refresh token dura 7 días).
+   */
+  async resetPassword(id: number, password: string) {
+    const generador = await this.findOne(id);
+    const password_hash = await argon2.hash(password);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.usuario.update({
+        where: { id: generador.usuario_id },
+        data: { password_hash },
+      });
+      await tx.sesion_refresh.deleteMany({
+        where: { usuario_id: generador.usuario_id },
+      });
+    });
+
+    // Nunca se devuelve la contraseña ni el hash.
+    return {
+      id: generador.id,
+      razon_social: generador.razon_social,
+      identificador: generador.contacto_telefono,
+    };
   }
 }

@@ -19,12 +19,14 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/shared/password-input";
 import {
   Select,
   SelectContent,
@@ -236,8 +238,7 @@ function GeneradorForm({
                 <FormItem>
                   <FormLabel>Contraseña</FormLabel>
                   <FormControl>
-                    <Input
-                      type="password"
+                    <PasswordInput
                       placeholder="Mínimo 8 caracteres"
                       disabled={isPending}
                       {...field}
@@ -329,6 +330,13 @@ function GeneradorForm({
                     {...field}
                   />
                 </FormControl>
+                {isEditing && (
+                  <FormDescription>
+                    Este teléfono es también el usuario con el que el generador
+                    inicia sesión. Si lo cambia, avísele: tendrá que entrar con el
+                    número nuevo.
+                  </FormDescription>
+                )}
                 <FormMessage />
               </FormItem>
             )}

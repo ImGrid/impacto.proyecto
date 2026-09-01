@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { MoreHorizontal, Pencil, Power, Trash2 } from "lucide-react";
+import { KeyRound, MoreHorizontal, Pencil, Power, Trash2 } from "lucide-react";
 import {
   useUpdateCentroOperacional,
   useDeleteCentroOperacional,
+  useResetPasswordCentroOperacional,
 } from "@/hooks/use-centros-operacionales";
 import type { CentroOperacional } from "@/types/api";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { ResetPasswordDialog } from "@/components/shared/reset-password-dialog";
 import { CentroOperacionalFormDialog } from "./centro-operacional-form-dialog";
 
 interface CentrosOperacionalesTableActionsProps {
@@ -27,9 +29,11 @@ export function CentrosOperacionalesTableActions({
 }: CentrosOperacionalesTableActionsProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   const updateMutation = useUpdateCentroOperacional();
   const deleteMutation = useDeleteCentroOperacional();
+  const resetPasswordMutation = useResetPasswordCentroOperacional();
 
   function handleToggleActivo() {
     updateMutation.mutate({
@@ -58,6 +62,10 @@ export function CentrosOperacionalesTableActions({
             <Pencil />
             Editar
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setPasswordOpen(true)}>
+            <KeyRound />
+            Restablecer contraseña
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={handleToggleActivo}>
             <Power />
             {centro.usuario.activo ? "Desactivar" : "Activar"}
@@ -77,6 +85,21 @@ export function CentrosOperacionalesTableActions({
         open={editOpen}
         onOpenChange={setEditOpen}
         centro={centro}
+      />
+
+      <ResetPasswordDialog
+        open={passwordOpen}
+        onOpenChange={setPasswordOpen}
+        nombre={centro.nombre_completo}
+        identificador={centro.usuario.email ?? ""}
+        tipoIdentificador="email"
+        isPending={resetPasswordMutation.isPending}
+        onConfirm={(password) =>
+          resetPasswordMutation.mutate(
+            { id: centro.id, password },
+            { onSuccess: () => setPasswordOpen(false) },
+          )
+        }
       />
 
       <ConfirmDialog

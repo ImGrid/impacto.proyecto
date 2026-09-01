@@ -283,6 +283,50 @@ export class RecolectoresService {
       void foto_base64;
       void foto_eliminar;
 
+      // La cédula se normaliza igual que al crear (quita espacios: la CI
+      // boliviana se escribe "9876543 CB"). Sin esto, editar la cédula desde
+      // la web la guardaba con el espacio mientras que al crear se guardaba
+      // sin él, y el recolector quedaba sin poder entrar.
+      if (recolectorData.cedula_identidad !== undefined) {
+        recolectorData.cedula_identidad = normalizarCI(
+          recolectorData.cedula_identidad,
+        );
+      }
+
+      // El recolector INICIA SESIÓN con su cédula: `usuario.identificador` es
+      // una copia de `recolector.cedula_identidad` hecha al crearlo. Si el
+      // administrador corrige la cédula hay que mover las dos, o la persona
+      // sigue entrando con la cédula vieja mientras la web muestra la nueva
+      // (ya le pasó a dos recolectoras reales).
+      const cedulaNueva = recolectorData.cedula_identidad;
+      const cambiaCedula =
+        cedulaNueva !== undefined &&
+        cedulaNueva !== recolector.cedula_identidad;
+
+      if (cambiaCedula) {
+        // `usuario.identificador` es único en toda la tabla, no solo entre
+        // recolectores: podría chocar con el email de un centro operacional o
+        // con el teléfono de un generador. Se comprueba antes para dar un
+        // mensaje claro en vez del error crudo de la base de datos.
+        const ocupado = await tx.usuario.findFirst({
+          where: {
+            identificador: cedulaNueva,
+            id: { not: recolector.usuario_id },
+          },
+          select: { id: true },
+        });
+        if (ocupado) {
+          throw new BadRequestException(
+            `Ya existe otro usuario que inicia sesión con "${cedulaNueva}". Use otra cédula.`,
+          );
+        }
+
+        await tx.usuario.update({
+          where: { id: recolector.usuario_id },
+          data: { identificador: cedulaNueva },
+        });
+      }
+
       // Update recolector fields if any. Si cambió la zona se re-deriva el
       // departamento_id. Si se subió/eliminó la foto, se setea/limpia foto_url.
       if (
@@ -391,6 +435,46 @@ export class RecolectoresService {
     });
     // El cascade borró el recolector; limpiar el archivo de su foto.
     await this.imageStorage.deleteByPublicPath(recolector.foto_url);
+  }
+
+  /**
+   * El administrador le asigna una contraseña nueva al recolector.
+   *
+   * Es la única forma de recuperar la cuenta: no hay recuperación por correo
+   * (la mayoría de los recolectores no tiene email registrado) y el propio
+   * recolector no puede cambiarla desde la app.
+   *
+   * Se cierran todas las sesiones abiertas del usuario. Si la contraseña se
+   * está cambiando porque alguien más tuvo acceso a la cuenta, dejar viva la
+   * sesión anterior haría inútil el cambio: el refresh token seguiría
+   * funcionando durante 7 días.
+   */
+  async resetPassword(
+    id: number,
+    password: string,
+    departamentoActivo: number | null,
+  ) {
+    // findOne aplica el scope por departamento: un admin de Cochabamba no
+    // puede cambiarle la contraseña a un recolector de La Paz.
+    const recolector = await this.findOne(id, departamentoActivo);
+    const password_hash = await argon2.hash(password);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.usuario.update({
+        where: { id: recolector.usuario_id },
+        data: { password_hash },
+      });
+      await tx.sesion_refresh.deleteMany({
+        where: { usuario_id: recolector.usuario_id },
+      });
+    });
+
+    // Nunca se devuelve la contraseña ni el hash.
+    return {
+      id: recolector.id,
+      nombre_completo: recolector.nombre_completo,
+      identificador: recolector.cedula_identidad,
+    };
   }
 
   /**

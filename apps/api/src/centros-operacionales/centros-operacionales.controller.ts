@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/decorators';
+import { ResetPasswordDto } from '../common/dto';
 import { CentrosOperacionalesService } from './centros-operacionales.service';
 import {
   CreateCentroOperacionalDto,
@@ -70,6 +71,21 @@ export class CentrosOperacionalesController {
     @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
     return this.centrosOperacionalesService.update(id, dto, departamentoActivo);
+  }
+
+  // Restablecer la contraseña. Ruta aparte del PATCH normal para que cambiar
+  // la contraseña sea siempre un acto deliberado.
+  @Patch(':id/password')
+  resetPassword(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ResetPasswordDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.centrosOperacionalesService.resetPassword(
+      id,
+      dto.password,
+      departamentoActivo,
+    );
   }
 
   @Delete(':id')

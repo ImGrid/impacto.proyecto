@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
 import { Roles } from '../auth/decorators';
+import { ResetPasswordDto } from '../common/dto';
 import { GeneradoresService } from './generadores.service';
 import { CreateGeneradorDto, UpdateGeneradorDto, GeneradorQueryDto } from './dto';
 
@@ -47,6 +48,16 @@ export class GeneradoresController {
     @Body() dto: UpdateGeneradorDto,
   ) {
     return this.generadoresService.update(id, dto);
+  }
+
+  // Restablecer la contraseña. Ruta aparte del PATCH normal para que cambiar
+  // la contraseña sea siempre un acto deliberado.
+  @Patch(':id/password')
+  resetPassword(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ResetPasswordDto,
+  ) {
+    return this.generadoresService.resetPassword(id, dto.password);
   }
 
   @Delete(':id')

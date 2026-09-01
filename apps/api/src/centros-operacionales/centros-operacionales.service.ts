@@ -226,4 +226,39 @@ export class CentrosOperacionalesService {
       where: { id: centro.usuario_id },
     });
   }
+
+  /**
+   * El administrador le asigna una contraseña nueva al centro operacional.
+   *
+   * Se cierran todas sus sesiones abiertas: si el cambio se hace porque
+   * alguien más tuvo acceso a la cuenta, dejar viva la sesión anterior lo
+   * haría inútil (el refresh token dura 7 días).
+   */
+  async resetPassword(
+    id: number,
+    password: string,
+    departamentoActivo: number | null,
+  ) {
+    // findOne aplica el scope por departamento activo.
+    const centro = await this.findOne(id, departamentoActivo);
+    const password_hash = await argon2.hash(password);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.usuario.update({
+        where: { id: centro.usuario_id },
+        data: { password_hash },
+      });
+      await tx.sesion_refresh.deleteMany({
+        where: { usuario_id: centro.usuario_id },
+      });
+    });
+
+    // Nunca se devuelve la contraseña ni el hash. El centro operacional
+    // inicia sesión con su email.
+    return {
+      id: centro.id,
+      nombre_completo: centro.nombre_completo,
+      identificador: centro.usuario?.email ?? null,
+    };
+  }
 }

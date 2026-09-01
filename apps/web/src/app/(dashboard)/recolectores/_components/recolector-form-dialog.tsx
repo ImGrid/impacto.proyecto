@@ -39,12 +39,14 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/shared/password-input";
 import {
   Select,
   SelectContent,
@@ -497,8 +499,7 @@ function RecolectorForm({
                   <FormItem>
                     <FormLabel>Contraseña</FormLabel>
                     <FormControl>
-                      <Input
-                        type="password"
+                      <PasswordInput
                         placeholder="Mínimo 8 caracteres"
                         disabled={isPending}
                         {...field}
@@ -602,6 +603,13 @@ function RecolectorForm({
                       {...field}
                     />
                   </FormControl>
+                  {isEditing && (
+                    <FormDescription>
+                      La cédula es también el usuario con el que la recolectora
+                      inicia sesión. Si la corrige, avísele: tendrá que entrar con
+                      la cédula nueva.
+                    </FormDescription>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}

@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { rol_usuario } from '@prisma/client';
 import { CurrentUser, Roles } from '../auth/decorators';
+import { ResetPasswordDto } from '../common/dto';
 import { RecolectoresService } from './recolectores.service';
 import {
   CreateRecolectorDto,
@@ -66,6 +67,23 @@ export class RecolectoresController {
     @CurrentUser('departamento_activo') departamentoActivo: number | null,
   ) {
     return this.recolectoresService.update(id, dto, departamentoActivo);
+  }
+
+  // Restablecer la contraseña. Va en una ruta aparte y no en el PATCH normal
+  // para que cambiar la contraseña sea siempre un acto deliberado y quede
+  // claro en los registros del servidor, en vez de viajar mezclado con una
+  // edición cualquiera del perfil.
+  @Patch(':id/password')
+  resetPassword(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ResetPasswordDto,
+    @CurrentUser('departamento_activo') departamentoActivo: number | null,
+  ) {
+    return this.recolectoresService.resetPassword(
+      id,
+      dto.password,
+      departamentoActivo,
+    );
   }
 
   @Delete(':id')
